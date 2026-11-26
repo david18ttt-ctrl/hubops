@@ -1,6 +1,6 @@
 # HubOps: live floor tools for a parcel sort hub
 
-I built this toolkit in under a month while working night shift at a high-volume parcel hub (up to 380,000 packages a day
+I built this toolkit while working night shift at a high-volume parcel hub (up to 380,000 packages a day
 across a cross-belt sorter, dozens of inbound linehaul trucks and a dozen delivery stations). The warehouse system
 had all the data, but nobody on the floor could see it in time to act: how much freight was really left, which
 chutes were jammed, which outbound truck needed boxes pulled right now. These tools read the warehouse system every
