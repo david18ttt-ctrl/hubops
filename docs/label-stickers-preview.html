@@ -1,0 +1,351 @@
+<!doctype html><html lang="es"><head>
+<script>
+(() => {
+  const LABEL = {"bag":"BG012611251011-043","route":"VCT01-017","dest":"VCT01","chute":"43","pcs":77,"date":"2026-11-25 21:36:03","origin":"HOU.H","operator":"Sorter 1","merge":[],"pkg":"PKG261125689488444","note":""};
+  let asked = 0, at = Date.now();
+  const ok = (data) => Promise.resolve(new Response(JSON.stringify(data), { headers: { "content-type": "application/json" } }));
+  const real = window.fetch.bind(window);
+  window.fetch = (url, init) => {
+    const u = String(url);
+    if (u === "/s/demo-scan-0000000000" + "/req") { at = Date.now(); asked = 0; return ok({ id: 1 }); }
+    if (u === "/s/demo-scan-0000000000" + "/req/1") {
+      asked++; // first answer: still looking; then looked up and printed
+      return ok({ id: 1, code: LABEL.pkg, at, status: asked < 2 ? "new" : "done", msg: "", label: LABEL,
+        printedAt: asked < 2 ? null : Date.now(), host: true, printer: true });
+    }
+    if (u.endsWith("/stickers/status")) return ok({ printer: true });
+    if (u.endsWith("/sticker")) return ok({ ok: true, name: "sticker", copies: 1, printer: true });
+    if (u.startsWith("/s/demo-scan-0000000000")) return ok({ ok: true });
+    return real(url, init);
+  };
+})();
+</script><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex"><meta name="theme-color" content="#111"><title>Etiquetas</title>
+<style>
+:root { color-scheme: light; --ink: #111; --bg: #f2f2f0; --line: #d6d6d2; --ok: #0a7d32; --bad: #c41a1a; }
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body { margin: 0; background: var(--bg); color: var(--ink); font: 17px -apple-system, "Segoe UI", Roboto, Arial, sans-serif; }
+header { position: sticky; top: 0; z-index: 5; background: var(--ink); color: #fff; padding: calc(10px + env(safe-area-inset-top)) 16px 12px; }
+.bar { display: flex; align-items: center; gap: 10px; min-height: 40px; }
+.bar h1 { flex: 1; margin: 0; font-size: 22px; font-weight: 900; text-transform: uppercase; letter-spacing: -.3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#back { border: 0; background: #fff; color: var(--ink); font: inherit; font-weight: 900; font-size: 22px; width: 44px; height: 44px; border-radius: 8px; }
+#back[hidden], #home[hidden] { display: none; }
+#home { display: inline-flex; align-items: center; text-decoration: none; border: 0; background: #fff; color: var(--ink); font: inherit; font-weight: 900; font-size: 15px; height: 44px; padding: 0 12px; border-radius: 8px; text-transform: uppercase; }
+.dot { width: 12px; height: 12px; border-radius: 50%; background: #777; flex: 0 0 12px; }
+.dot.on { background: #3ad06a; } .dot.off { background: #ff4b4b; }
+#q { margin-top: 10px; width: 100%; font: inherit; font-size: 18px; padding: 13px 14px; border-radius: 8px; border: 0; background: #fff; color: var(--ink); }
+main { padding: 14px 16px calc(120px + env(safe-area-inset-bottom)); max-width: 640px; margin: 0 auto; }
+.note { color: #555; font-size: 14px; margin: 2px 0 12px; }
+.sec { font-size: 13px; font-weight: 800; text-transform: uppercase; letter-spacing: .6px; color: #555; margin: 18px 0 8px; }
+.tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.tile { display: flex; flex-direction: column; justify-content: space-between; min-height: 104px; padding: 14px; border-radius: 10px;
+  border: 2px solid var(--ink); background: #fff; color: var(--ink); text-decoration: none; font: inherit; text-align: left; width: 100%; }
+.tile b { font-size: 24px; font-weight: 900; line-height: 1.05; }
+.tile span { font-size: 14px; color: #555; }
+.tile.dark { background: var(--ink); color: #fff; } .tile.dark span { color: #ccc; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(98px, 1fr)); gap: 8px; }
+.card { border: 2px solid var(--ink); background: #fff; border-radius: 10px; padding: 10px 6px 8px; text-align: center; font: inherit; color: var(--ink); min-height: 84px; width: 100%; }
+.card .big { display: block; font-size: 30px; font-weight: 900; letter-spacing: -.5px; line-height: 1.05; word-break: break-word; }
+.card .big.long { font-size: 19px; }
+.card .sm { display: block; font-size: 12.5px; color: #555; margin-top: 4px; }
+.card .tag { display: inline-block; font-size: 11px; font-weight: 800; background: #eee; border-radius: 4px; padding: 1px 5px; margin-top: 4px; }
+.seg { display: flex; gap: 8px; margin-bottom: 12px; }
+.seg a { flex: 1; text-align: center; padding: 12px 0; border: 2px solid var(--ink); border-radius: 10px; font-size: 26px; font-weight: 900; color: var(--ink); text-decoration: none; background: #fff; }
+.seg a.on { background: var(--ink); color: #fff; }
+.empty { color: #555; padding: 24px 0; text-align: center; }
+/* Bottom sheet */
+#shade { position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 20; }
+#sheet { position: fixed; left: 0; right: 0; bottom: 0; z-index: 21; background: #fff; border-radius: 16px 16px 0 0;
+  padding: 14px 16px calc(16px + env(safe-area-inset-bottom)); max-width: 640px; margin: 0 auto; max-height: 92vh; overflow: auto; }
+#shade[hidden], #sheet[hidden] { display: none; }
+.prev { display: flex; justify-content: center; align-items: center; height: 34vh; max-height: 300px; margin-bottom: 10px; overflow: hidden; }
+.prev img { max-height: 100%; max-width: 100%; border: 1px solid var(--line); background: #fff; }
+.prev img.side { transform: rotate(-90deg); max-height: none; max-width: none; height: auto; width: min(30vh, calc((100vw - 40px) / 1.5)); flex: 0 0 auto; }
+.what { text-align: center; font-size: 24px; font-weight: 900; }
+.what small { display: block; font-size: 14px; font-weight: 600; color: #555; }
+.qty { display: flex; align-items: center; justify-content: center; gap: 14px; margin: 14px 0 10px; }
+.qty button { width: 64px; height: 64px; border-radius: 50%; border: 2px solid var(--ink); background: #fff; font-size: 34px; font-weight: 900; color: var(--ink); }
+.qty output { min-width: 90px; text-align: center; font-size: 46px; font-weight: 900; }
+.chips { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; margin-bottom: 14px; }
+.chips button { border: 2px solid var(--ink); background: #fff; border-radius: 999px; padding: 9px 16px; font: inherit; font-weight: 800; color: var(--ink); }
+.chips button.on { background: var(--ink); color: #fff; }
+#print { width: 100%; border: 0; border-radius: 12px; padding: 20px; font: inherit; font-size: 22px; font-weight: 900; background: var(--ink); color: #fff; text-transform: uppercase; }
+#print:disabled { opacity: .45; }
+#cancel { width: 100%; margin-top: 8px; border: 0; background: none; font: inherit; font-weight: 700; color: #555; padding: 10px; }
+#toast { position: fixed; left: 16px; right: 16px; bottom: calc(16px + env(safe-area-inset-bottom)); z-index: 30; background: var(--ink); color: #fff;
+  border-radius: 12px; padding: 14px 16px; font-weight: 700; max-width: 608px; margin: 0 auto; box-shadow: 0 6px 24px rgba(0,0,0,.25); }
+#toast[hidden] { display: none; } #toast.bad { background: var(--bad); }
+</style></head><body>
+<header>
+  <div class="bar"><button id="back" hidden aria-label="Atrás">‹</button><h1 id="title">Etiquetas</h1><a id="home" href="label-station-preview.html" aria-label="Inicio">⌂ Inicio</a><span class="dot" id="dot" title="Impresora"></span></div>
+  <input id="q" type="search" inputmode="search" autocomplete="off" placeholder="Buscar: 087, VCT 5, R 004, PHX…">
+</header>
+<main id="main"></main>
+<div id="shade" hidden></div>
+<div id="sheet" hidden>
+  <div class="prev"><img id="pimg" alt=""></div>
+  <div class="what" id="pname"></div>
+  <div class="qty"><button id="minus" aria-label="Menos">−</button><output id="n">10</output><button id="plus" aria-label="Más">+</button></div>
+  <div class="chips" id="chips"></div>
+  <button id="print">Imprimir</button>
+  <button id="cancel">Cancelar</button>
+</div>
+<div id="toast" hidden></div>
+<script>
+const BASE = "/s/demo-scan-0000000000";
+const ALL = [{"id":"c001","chute":1,"g":"other","sub":"Exception","name":"NOREAD","type":"Excepción"},{"id":"c002","chute":2,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c003","chute":3,"g":"other","sub":"Exception","name":"OVER LOOP","type":"Excepción"},{"id":"c004","chute":4,"g":"station","sub":"AUS01","name":"AUS01-001","type":""},{"id":"c005","chute":5,"g":"station","sub":"AUS01","name":"AUS01-002","type":""},{"id":"c006","chute":6,"g":"station","sub":"AUS01","name":"AUS01-003","type":""},{"id":"c007","chute":7,"g":"station","sub":"AUS01","name":"AUS01-004","type":""},{"id":"c008","chute":8,"g":"station","sub":"AUS01","name":"AUS01-005","type":""},{"id":"c009","chute":9,"g":"station","sub":"AUS01","name":"AUS01-006","type":""},{"id":"c010","chute":10,"g":"station","sub":"AUS01","name":"AUS01-007","type":""},{"id":"c011","chute":11,"g":"station","sub":"AUS01","name":"AUS01-008","type":""},{"id":"c012","chute":12,"g":"station","sub":"AUS01","name":"AUS01-009","type":""},{"id":"c013","chute":13,"g":"station","sub":"AUS01","name":"AUS01-010","type":""},{"id":"c014","chute":14,"g":"station","sub":"AUS01","name":"AUS01-011","type":""},{"id":"c015","chute":15,"g":"station","sub":"AUS01","name":"AUS01-012","type":""},{"id":"c016","chute":16,"g":"station","sub":"AUS01","name":"AUS01-013","type":""},{"id":"c017","chute":17,"g":"station","sub":"AUS01","name":"AUS01-014","type":""},{"id":"c018","chute":18,"g":"station","sub":"ACT01","name":"ACT01-001","type":""},{"id":"c019","chute":19,"g":"station","sub":"ACT01","name":"ACT01-002","type":""},{"id":"c020","chute":20,"g":"station","sub":"ACT01","name":"ACT01-003","type":""},{"id":"c021","chute":21,"g":"station","sub":"ACT01","name":"ACT01-004","type":""},{"id":"c022","chute":22,"g":"station","sub":"ACT01","name":"ACT01-005","type":""},{"id":"c023","chute":23,"g":"station","sub":"ACT01","name":"ACT01-006","type":""},{"id":"c024","chute":24,"g":"station","sub":"ACT01","name":"ACT01-007","type":""},{"id":"c025","chute":25,"g":"station","sub":"ACT01","name":"ACT01-008","type":""},{"id":"c026","chute":26,"g":"station","sub":"ACT01","name":"ACT01-009","type":""},{"id":"c027","chute":27,"g":"station","sub":"VCT01","name":"VCT01-001","type":""},{"id":"c028","chute":28,"g":"station","sub":"VCT01","name":"VCT01-002","type":""},{"id":"c029","chute":29,"g":"station","sub":"VCT01","name":"VCT01-003","type":""},{"id":"c030","chute":30,"g":"station","sub":"VCT01","name":"VCT01-004","type":""},{"id":"c031","chute":31,"g":"station","sub":"VCT01","name":"VCT01-005","type":""},{"id":"c032","chute":32,"g":"station","sub":"VCT01","name":"VCT01-006","type":""},{"id":"c033","chute":33,"g":"station","sub":"VCT01","name":"VCT01-007","type":""},{"id":"c034","chute":34,"g":"station","sub":"VCT01","name":"VCT01-008","type":""},{"id":"c035","chute":35,"g":"station","sub":"VCT01","name":"VCT01-009","type":""},{"id":"c036","chute":36,"g":"station","sub":"VCT01","name":"VCT01-010","type":""},{"id":"c037","chute":37,"g":"station","sub":"VCT01","name":"VCT01-011","type":""},{"id":"c038","chute":38,"g":"station","sub":"VCT01","name":"VCT01-012","type":""},{"id":"c039","chute":39,"g":"station","sub":"VCT01","name":"VCT01-013","type":""},{"id":"c040","chute":40,"g":"station","sub":"VCT01","name":"VCT01-014","type":""},{"id":"c041","chute":41,"g":"station","sub":"VCT01","name":"VCT01-015","type":""},{"id":"c042","chute":42,"g":"station","sub":"VCT01","name":"VCT01-016","type":""},{"id":"c043","chute":43,"g":"station","sub":"VCT01","name":"VCT01-017","type":""},{"id":"c044","chute":44,"g":"station","sub":"VCT01","name":"VCT01-018","type":""},{"id":"c045","chute":45,"g":"station","sub":"VCT01","name":"VCT01-019","type":""},{"id":"c046","chute":46,"g":"station","sub":"VCT01","name":"VCT01-020","type":""},{"id":"c047","chute":47,"g":"station","sub":"VCT01","name":"VCT01-021","type":""},{"id":"c048","chute":48,"g":"station","sub":"BRO01","name":"BRO01-001","type":""},{"id":"c049","chute":49,"g":"city","sub":"PHX.H","name":"PHX.H","type":""},{"id":"c050","chute":50,"g":"city","sub":"STL.H","name":"STL.H","type":""},{"id":"c051","chute":51,"g":"city","sub":"MSP.H","name":"MSP.H","type":""},{"id":"c052","chute":52,"g":"city","sub":"SEA.H","name":"SEA.H","type":""},{"id":"c053","chute":53,"g":"city","sub":"BOS.H","name":"BOS.H","type":""},{"id":"c054","chute":54,"g":"city","sub":"PIT.H","name":"PIT.H","type":""},{"id":"c055","chute":55,"g":"city","sub":"ABQ.H","name":"ABQ.H","type":""},{"id":"c056","chute":56,"g":"city","sub":"SAN.H","name":"SAN.H","type":""},{"id":"c057","chute":57,"g":"station","sub":"BRO01","name":"BRO01-002","type":""},{"id":"c058","chute":58,"g":"station","sub":"BRO01","name":"BRO01-003","type":""},{"id":"c059","chute":59,"g":"station","sub":"BRO01","name":"BRO01-004","type":""},{"id":"c060","chute":60,"g":"station","sub":"BRO01","name":"BRO01-005","type":""},{"id":"c061","chute":61,"g":"station","sub":"BRO01","name":"BRO01-006","type":""},{"id":"c062","chute":62,"g":"station","sub":"BRO01","name":"BRO01-007","type":""},{"id":"c063","chute":63,"g":"station","sub":"BRO01","name":"BRO01-008","type":""},{"id":"c064","chute":64,"g":"station","sub":"BRO01","name":"BRO01-009","type":""},{"id":"c065","chute":65,"g":"station","sub":"BRO01","name":"BRO01-010","type":""},{"id":"c066","chute":66,"g":"station","sub":"BRO01","name":"BRO01-011","type":""},{"id":"c067","chute":67,"g":"station","sub":"BRO01","name":"BRO01-012","type":""},{"id":"c068","chute":68,"g":"station","sub":"HRL01","name":"HRL01-001","type":""},{"id":"c069","chute":69,"g":"station","sub":"HRL01","name":"HRL01-002","type":""},{"id":"c070","chute":70,"g":"station","sub":"HRL01","name":"HRL01-003","type":""},{"id":"c071","chute":71,"g":"station","sub":"HRL01","name":"HRL01-004","type":""},{"id":"c072","chute":72,"g":"station","sub":"HRL01","name":"HRL01-005","type":""},{"id":"c073","chute":73,"g":"station","sub":"HRL01","name":"HRL01-006","type":""},{"id":"c074","chute":74,"g":"station","sub":"HRL01","name":"HRL01-007","type":""},{"id":"c075","chute":75,"g":"station","sub":"HRL01","name":"HRL01-008","type":""},{"id":"c076","chute":76,"g":"station","sub":"SJT01","name":"SJT01-001","type":""},{"id":"c077","chute":77,"g":"station","sub":"SJT01","name":"SJT01-002","type":""},{"id":"c078","chute":78,"g":"station","sub":"SJT01","name":"SJT01-003","type":""},{"id":"c079","chute":79,"g":"station","sub":"SJT01","name":"SJT01-004","type":""},{"id":"c080","chute":80,"g":"station","sub":"SJT01","name":"SJT01-005","type":""},{"id":"c081","chute":81,"g":"station","sub":"SJT01","name":"SJT01-006","type":""},{"id":"c082","chute":82,"g":"station","sub":"SJT01","name":"SJT01-007","type":""},{"id":"c083","chute":83,"g":"station","sub":"SJT01","name":"SJT01-008","type":""},{"id":"c084","chute":84,"g":"station","sub":"SJT01","name":"SJT01-009","type":""},{"id":"c085","chute":85,"g":"station","sub":"SJT01","name":"SJT01-010","type":""},{"id":"c086","chute":86,"g":"station","sub":"SJT01","name":"SJT01-011","type":""},{"id":"c087","chute":87,"g":"station","sub":"SJT01","name":"SJT01-012","type":""},{"id":"c088","chute":88,"g":"station","sub":"SJT01","name":"SJT01-013","type":""},{"id":"c089","chute":89,"g":"station","sub":"SJT01","name":"SJT01-014","type":""},{"id":"c090","chute":90,"g":"station","sub":"SJT01","name":"SJT01-015","type":""},{"id":"c091","chute":91,"g":"station","sub":"SJT01","name":"SJT01-016","type":""},{"id":"c092","chute":92,"g":"station","sub":"GGG01","name":"GGG01-001","type":""},{"id":"c093","chute":93,"g":"station","sub":"GGG01","name":"GGG01-002","type":""},{"id":"c094","chute":94,"g":"station","sub":"GGG01","name":"GGG01-003","type":""},{"id":"c095","chute":95,"g":"station","sub":"GGG01","name":"GGG01-004","type":""},{"id":"c096","chute":96,"g":"station","sub":"GGG01","name":"GGG01-005","type":""},{"id":"c097","chute":97,"g":"station","sub":"GGG01","name":"GGG01-006","type":""},{"id":"c098","chute":98,"g":"station","sub":"GGG01","name":"GGG01-007","type":""},{"id":"c099","chute":99,"g":"station","sub":"GGG01","name":"GGG01-008","type":""},{"id":"c100","chute":100,"g":"station","sub":"GGG01","name":"GGG01-009","type":""},{"id":"c101","chute":101,"g":"station","sub":"GGG01","name":"GGG01-010","type":""},{"id":"c102","chute":102,"g":"station","sub":"TXK01","name":"TXK01-001","type":""},{"id":"c103","chute":103,"g":"station","sub":"TXK01","name":"TXK01-002","type":""},{"id":"c104","chute":104,"g":"station","sub":"TXK01","name":"TXK01-003","type":""},{"id":"c105","chute":105,"g":"station","sub":"TXK01","name":"TXK01-004","type":""},{"id":"c106","chute":106,"g":"station","sub":"TXK01","name":"TXK01-005","type":""},{"id":"c107","chute":107,"g":"station","sub":"TXK01","name":"TXK01-006","type":""},{"id":"c108","chute":108,"g":"station","sub":"SHV01","name":"SHV01-001","type":""},{"id":"c109","chute":109,"g":"other","sub":"Exception","name":"NOREAD","type":"Excepción"},{"id":"c110","chute":110,"g":"station","sub":"SHV01","name":"SHV01-002","type":""},{"id":"c111","chute":111,"g":"station","sub":"SHV01","name":"SHV01-003","type":""},{"id":"c112","chute":112,"g":"station","sub":"SHV01","name":"SHV01-004","type":""},{"id":"c113","chute":113,"g":"station","sub":"SHV01","name":"SHV01-005","type":""},{"id":"c114","chute":114,"g":"station","sub":"SHV01","name":"SHV01-006","type":""},{"id":"c115","chute":115,"g":"station","sub":"SHV01","name":"SHV01-007","type":""},{"id":"c116","chute":116,"g":"station","sub":"SHV01","name":"SHV01-008","type":""},{"id":"c117","chute":117,"g":"station","sub":"SHV01","name":"SHV01-009","type":""},{"id":"c118","chute":118,"g":"station","sub":"SHV01","name":"SHV01-010","type":""},{"id":"c119","chute":119,"g":"station","sub":"SHV01","name":"SHV01-011","type":""},{"id":"c120","chute":120,"g":"station","sub":"AEX01","name":"AEX01-001","type":""},{"id":"c121","chute":121,"g":"station","sub":"AEX01","name":"AEX01-002","type":""},{"id":"c122","chute":122,"g":"station","sub":"AEX01","name":"AEX01-003","type":""},{"id":"c123","chute":123,"g":"station","sub":"AEX01","name":"AEX01-004","type":""},{"id":"c124","chute":124,"g":"station","sub":"AEX01","name":"AEX01-005","type":""},{"id":"c125","chute":125,"g":"station","sub":"AEX01","name":"AEX01-006","type":""},{"id":"c126","chute":126,"g":"station","sub":"AEX01","name":"AEX01-007","type":""},{"id":"c127","chute":127,"g":"station","sub":"CXO01","name":"CXO01-001","type":""},{"id":"c128","chute":128,"g":"station","sub":"CXO01","name":"CXO01-002","type":""},{"id":"c129","chute":129,"g":"station","sub":"CXO01","name":"CXO01-003","type":""},{"id":"c130","chute":130,"g":"station","sub":"CXO01","name":"CXO01-004","type":""},{"id":"c131","chute":131,"g":"station","sub":"CXO01","name":"CXO01-005","type":""},{"id":"c132","chute":132,"g":"station","sub":"CXO01","name":"CXO01-006","type":""},{"id":"c133","chute":133,"g":"station","sub":"CXO01","name":"CXO01-007","type":""},{"id":"c134","chute":134,"g":"station","sub":"CXO01","name":"CXO01-008","type":""},{"id":"c135","chute":135,"g":"station","sub":"CXO01","name":"CXO01-009","type":""},{"id":"c136","chute":136,"g":"station","sub":"CXO01","name":"CXO01-010","type":""},{"id":"c137","chute":137,"g":"station","sub":"CXO01","name":"CXO01-011","type":""},{"id":"c138","chute":138,"g":"station","sub":"CXO01","name":"CXO01-012","type":""},{"id":"c139","chute":139,"g":"station","sub":"CXO01","name":"CXO01-013","type":""},{"id":"c140","chute":140,"g":"station","sub":"SGR01","name":"SGR01-001","type":""},{"id":"c141","chute":141,"g":"station","sub":"SGR01","name":"SGR01-002","type":""},{"id":"c142","chute":142,"g":"station","sub":"SGR01","name":"SGR01-003","type":""},{"id":"c143","chute":143,"g":"station","sub":"SGR01","name":"SGR01-004","type":""},{"id":"c144","chute":144,"g":"station","sub":"SGR01","name":"SGR01-005","type":""},{"id":"c145","chute":145,"g":"station","sub":"SHV01","name":"SHV01-006","type":""},{"id":"c146","chute":146,"g":"other","sub":"Exception","name":"INTERCEPT","type":"Excepción"},{"id":"c147","chute":147,"g":"other","sub":"Exception","name":"NO MATCH","type":"Excepción"},{"id":"c148","chute":148,"g":"station","sub":"TXK01","name":"TXK01-001","type":""},{"id":"c149","chute":149,"g":"station","sub":"AUS01","name":"AUS01-013","type":""},{"id":"c150","chute":150,"g":"station","sub":"ACT01","name":"ACT01-008","type":""},{"id":"c151","chute":151,"g":"station","sub":"CXO01","name":"CXO01-002","type":""},{"id":"c152","chute":152,"g":"station","sub":"ACT01","name":"ACT01-003","type":""},{"id":"c153","chute":153,"g":"station","sub":"VCT01","name":"VCT01-019","type":""},{"id":"c154","chute":154,"g":"station","sub":"VCT01","name":"VCT01-001","type":""},{"id":"c155","chute":155,"g":"station","sub":"VCT01","name":"VCT01-011","type":""},{"id":"c156","chute":156,"g":"station","sub":"SJT01","name":"SJT01-012","type":""},{"id":"c157","chute":157,"g":"station","sub":"CXO01","name":"CXO01-010","type":""},{"id":"c158","chute":158,"g":"station","sub":"BRO01","name":"BRO01-005","type":""},{"id":"c159","chute":159,"g":"station","sub":"AEX01","name":"AEX01-003","type":""},{"id":"c160","chute":160,"g":"station","sub":"SHV01","name":"SHV01-010","type":""},{"id":"c161","chute":161,"g":"station","sub":"GGG01","name":"GGG01-002","type":""},{"id":"c162","chute":162,"g":"station","sub":"CXO01","name":"CXO01-006","type":""},{"id":"c163","chute":163,"g":"station","sub":"TXK01","name":"TXK01-006","type":""},{"id":"c164","chute":164,"g":"station","sub":"VCT01","name":"VCT01-010","type":""},{"id":"c165","chute":165,"g":"station","sub":"GGG01","name":"GGG01-001","type":""},{"id":"c166","chute":166,"g":"station","sub":"AUS01","name":"AUS01-003","type":""},{"id":"c167","chute":167,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c168","chute":168,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c169","chute":169,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c170","chute":170,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c171","chute":171,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c172","chute":172,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c173","chute":173,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c174","chute":174,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c175","chute":175,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c176","chute":176,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c177","chute":177,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c178","chute":178,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c179","chute":179,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c180","chute":180,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c181","chute":181,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c182","chute":182,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c183","chute":183,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c184","chute":184,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c185","chute":185,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c186","chute":186,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c187","chute":187,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c188","chute":188,"g":"city","sub":"PHX.H","name":"PHX.H","type":""},{"id":"c189","chute":189,"g":"city","sub":"STL.H","name":"STL.H","type":""},{"id":"c190","chute":190,"g":"city","sub":"MSP.H","name":"MSP.H","type":""},{"id":"c191","chute":191,"g":"city","sub":"SEA.H","name":"SEA.H","type":""},{"id":"c192","chute":192,"g":"city","sub":"BOS.H","name":"BOS.H","type":""},{"id":"c193","chute":193,"g":"city","sub":"PIT.H","name":"PIT.H","type":""},{"id":"c194","chute":194,"g":"city","sub":"ABQ.H","name":"ABQ.H","type":""},{"id":"c195","chute":195,"g":"city","sub":"SAN.H","name":"SAN.H","type":""},{"id":"c196","chute":196,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c197","chute":197,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c198","chute":198,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c199","chute":199,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c200","chute":200,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c201","chute":201,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c202","chute":202,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c203","chute":203,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c204","chute":204,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c205","chute":205,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c206","chute":206,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c207","chute":207,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c208","chute":208,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c209","chute":209,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c210","chute":210,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c211","chute":211,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c212","chute":212,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c213","chute":213,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c214","chute":214,"g":"other","sub":"Exception","name":"NOREAD","type":"Excepción"},{"id":"c215","chute":215,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c216","chute":216,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c217","chute":217,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c218","chute":218,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c219","chute":219,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c220","chute":220,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c221","chute":221,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c222","chute":222,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c223","chute":223,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c224","chute":224,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c225","chute":225,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c226","chute":226,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c227","chute":227,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c228","chute":228,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c229","chute":229,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c230","chute":230,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c231","chute":231,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c232","chute":232,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c233","chute":233,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c234","chute":234,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c235","chute":235,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c236","chute":236,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c237","chute":237,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c238","chute":238,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c239","chute":239,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c240","chute":240,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c241","chute":241,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c242","chute":242,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c243","chute":243,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c244","chute":244,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c245","chute":245,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c246","chute":246,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c247","chute":247,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c248","chute":248,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c249","chute":249,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c250","chute":250,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c251","chute":251,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c252","chute":252,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c253","chute":253,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c254","chute":254,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c255","chute":255,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c256","chute":256,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c257","chute":257,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c258","chute":258,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c259","chute":259,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c260","chute":260,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c261","chute":261,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c262","chute":262,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c263","chute":263,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c264","chute":264,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c265","chute":265,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c266","chute":266,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c267","chute":267,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c268","chute":268,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c269","chute":269,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c270","chute":270,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c271","chute":271,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c272","chute":272,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c273","chute":273,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c274","chute":274,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c275","chute":275,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c276","chute":276,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c277","chute":277,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c278","chute":278,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c279","chute":279,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c280","chute":280,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c281","chute":281,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c282","chute":282,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c283","chute":283,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c284","chute":284,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c285","chute":285,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c286","chute":286,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c287","chute":287,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c288","chute":288,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c289","chute":289,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c290","chute":290,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c291","chute":291,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c292","chute":292,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c293","chute":293,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c294","chute":294,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c295","chute":295,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c296","chute":296,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c297","chute":297,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c298","chute":298,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c299","chute":299,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"c300","chute":300,"g":"other","sub":"Free","name":"FREE","type":"Libre"},{"id":"rR-001","g":"rst","sub":"R","name":"R 001","route":"AUS01-001","chute":4,"type":""},{"id":"rR-002","g":"rst","sub":"R","name":"R 002","route":"AUS01-002","chute":5,"type":""},{"id":"rR-003","g":"rst","sub":"R","name":"R 003","route":"AUS01-003","chute":6,"type":""},{"id":"rR-004","g":"rst","sub":"R","name":"R 004","route":"AUS01-004","chute":7,"type":""},{"id":"rR-005","g":"rst","sub":"R","name":"R 005","route":"AUS01-005","chute":8,"type":""},{"id":"rR-006","g":"rst","sub":"R","name":"R 006","route":"AUS01-006","chute":9,"type":""},{"id":"rR-007","g":"rst","sub":"R","name":"R 007","route":"AUS01-007","chute":10,"type":""},{"id":"rR-008","g":"rst","sub":"R","name":"R 008","route":"AUS01-008","chute":11,"type":""},{"id":"rR-009","g":"rst","sub":"R","name":"R 009","route":"AUS01-009","chute":12,"type":""},{"id":"rR-010","g":"rst","sub":"R","name":"R 010","route":"AUS01-010","chute":13,"type":""},{"id":"rR-011","g":"rst","sub":"R","name":"R 011","route":"AUS01-011","chute":14,"type":""},{"id":"rR-012","g":"rst","sub":"R","name":"R 012","route":"AUS01-012","chute":15,"type":""},{"id":"rR-013","g":"rst","sub":"R","name":"R 013","route":"AUS01-013","chute":16,"type":""},{"id":"rR-014","g":"rst","sub":"R","name":"R 014","route":"AUS01-014","chute":17,"type":""},{"id":"rS-001","g":"rst","sub":"S","name":"S 001","route":"AUS01-001","chute":4,"type":""},{"id":"rS-002","g":"rst","sub":"S","name":"S 002","route":"AUS01-002","chute":5,"type":""},{"id":"rS-003","g":"rst","sub":"S","name":"S 003","route":"AUS01-003","chute":6,"type":""},{"id":"rS-004","g":"rst","sub":"S","name":"S 004","route":"AUS01-004","chute":7,"type":""},{"id":"rS-005","g":"rst","sub":"S","name":"S 005","route":"AUS01-005","chute":8,"type":""},{"id":"rS-006","g":"rst","sub":"S","name":"S 006","route":"AUS01-006","chute":9,"type":""},{"id":"rS-007","g":"rst","sub":"S","name":"S 007","route":"AUS01-007","chute":10,"type":""},{"id":"rS-008","g":"rst","sub":"S","name":"S 008","route":"AUS01-008","chute":11,"type":""},{"id":"rS-009","g":"rst","sub":"S","name":"S 009","route":"AUS01-009","chute":12,"type":""},{"id":"rS-010","g":"rst","sub":"S","name":"S 010","route":"AUS01-010","chute":13,"type":""},{"id":"rS-011","g":"rst","sub":"S","name":"S 011","route":"AUS01-011","chute":14,"type":""},{"id":"rS-012","g":"rst","sub":"S","name":"S 012","route":"AUS01-012","chute":15,"type":""},{"id":"rS-013","g":"rst","sub":"S","name":"S 013","route":"AUS01-013","chute":16,"type":""},{"id":"rS-014","g":"rst","sub":"S","name":"S 014","route":"AUS01-014","chute":17,"type":""},{"id":"rT-001","g":"rst","sub":"T","name":"T 001","route":"AUS01-001","chute":4,"type":""},{"id":"rT-002","g":"rst","sub":"T","name":"T 002","route":"AUS01-002","chute":5,"type":""},{"id":"rT-003","g":"rst","sub":"T","name":"T 003","route":"AUS01-003","chute":6,"type":""},{"id":"rT-004","g":"rst","sub":"T","name":"T 004","route":"AUS01-004","chute":7,"type":""},{"id":"rT-005","g":"rst","sub":"T","name":"T 005","route":"AUS01-005","chute":8,"type":""},{"id":"rT-006","g":"rst","sub":"T","name":"T 006","route":"AUS01-006","chute":9,"type":""},{"id":"rT-007","g":"rst","sub":"T","name":"T 007","route":"AUS01-007","chute":10,"type":""},{"id":"rT-008","g":"rst","sub":"T","name":"T 008","route":"AUS01-008","chute":11,"type":""},{"id":"rT-009","g":"rst","sub":"T","name":"T 009","route":"AUS01-009","chute":12,"type":""},{"id":"rT-010","g":"rst","sub":"T","name":"T 010","route":"AUS01-010","chute":13,"type":""},{"id":"rT-011","g":"rst","sub":"T","name":"T 011","route":"AUS01-011","chute":14,"type":""},{"id":"rT-012","g":"rst","sub":"T","name":"T 012","route":"AUS01-012","chute":15,"type":""},{"id":"rT-013","g":"rst","sub":"T","name":"T 013","route":"AUS01-013","chute":16,"type":""},{"id":"rT-014","g":"rst","sub":"T","name":"T 014","route":"AUS01-014","chute":17,"type":""}];
+const ORDER = ["AUS01","ACT01","VCT01","BRO01","HRL01","SJT01","GGG01","TXK01","SHV01","AEX01","CXO01","SGR01"];
+const HUB = "HOU.H", HUB_SHORT = "HOU";
+const SIDE_SPLIT = 150;
+const MAX = 15;
+// Plain stickers: just the hub code in huge letters, or any code typed in. Nothing else on it.
+const CITIES = [...new Set(ALL.filter((x) => x.g === "city").map((x) => x.sub.replace(/[.]H$/, "")))].sort();
+const PLAIN = CITIES.map((c) => ({ id: "p:" + c, g: "plain", name: c, city: true }));
+const PMAX = 12;
+const cleanCode = (s) => { const t = String(s || "").toUpperCase().replace(/\s+/g, " ").trim(); return t && t.length <= PMAX && /^[A-Z0-9 .\-\/#]+$/.test(t) ? t : null; };
+// Time label: the same label the chute printers' feed button prints ("HOU 11/24" / "19:00" / "HOU.H"), hub time,
+// hour rounded down. Goes on the gaylord when it is pulled, 2 copies (front + back).
+function timeNow() {
+  const p = Object.fromEntries(new Intl.DateTimeFormat("en-US", { timeZone: "America/Chicago", month: "2-digit", day: "2-digit", hour: "2-digit", hourCycle: "h23" })
+    .formatToParts(new Date()).map((x) => [x.type, x.value]));
+  return { md: p.month + "/" + p.day, hh: p.hour + ":00" };
+}
+function timeItem() { const t = timeNow(); return { id: "t:now", g: "time", name: t.md + " " + t.hh, md: t.md, hh: t.hh }; }
+// A 4x6 portrait canvas turned so the drawing is a 1218 x 812 landscape (read sideways, like the chute stickers).
+function sideways() {
+  const c = document.createElement("canvas"); c.width = 812; c.height = 1218;
+  const g = c.getContext("2d");
+  g.fillStyle = "#fff"; g.fillRect(0, 0, 812, 1218);
+  g.translate(812, 0); g.rotate(Math.PI / 2);
+  g.fillStyle = "#000"; g.textAlign = "center"; g.textBaseline = "alphabetic";
+  return [c, g];
+}
+const F = (px, w) => (w || 900) + " " + px + 'px "Arial Black", "Helvetica Neue", Arial, sans-serif';
+function fitText(g, t, px, w, h) {
+  for (; px > 20; px -= 4) { g.font = F(px); const m = g.measureText(t); if (m.width <= w && (!h || m.actualBoundingBoxAscent + m.actualBoundingBoxDescent <= h)) break; }
+  return px;
+}
+function drawTime(x) {
+  const [c, g] = sideways();
+  fitText(g, HUB_SHORT + " " + x.md, 130, 1100); g.fillText(HUB_SHORT + " " + x.md, 609, 150);
+  fitText(g, x.hh, 440, 1150); g.fillText(x.hh, 609, 600);
+  fitText(g, HUB, 70, 600); g.fillText(HUB, 609, 760);
+  return c.toDataURL("image/png");
+}
+function byId(id) {
+  if (id === "t:now") return timeItem();
+  if (String(id).startsWith("u:")) { const t = cleanCode(id.slice(2)); return t ? { id: "u:" + t, g: "plain", name: t, city: false } : null; }
+  return PLAIN.find((x) => x.id === id) || ALL.find((x) => x.id === id) || null;
+}
+// Plain sticker: the code alone, as big as fits.
+function drawPlain(x) {
+  const [c, g] = sideways();
+  const top = 40, W = 1218 - 80, H = 812 - top - 40;
+  fitText(g, x.name, 700, W, H);
+  const m = g.measureText(x.name), h = m.actualBoundingBoxAscent + m.actualBoundingBoxDescent;
+  g.fillText(x.name, 609, top + (H - h) / 2 + m.actualBoundingBoxAscent);
+  return c.toDataURL("image/png");
+}
+// Chute sticker: the part people read off the chute huge, the rest and the chute number small.
+function drawChute(x) {
+  if (x.g === "rst") {
+    const c = document.createElement("canvas"); c.width = 812; c.height = 1218;
+    const g = c.getContext("2d");
+    g.fillStyle = "#fff"; g.fillRect(0, 0, 812, 1218); g.fillStyle = "#000"; g.textAlign = "center";
+    const [letter, num] = x.name.split(" ");
+    fitText(g, letter, 520, 700); g.fillText(letter, 406, 560);
+    fitText(g, num, 300, 740); g.fillText(num, 406, 900);
+    g.font = F(56, 700); g.fillText(x.route || "", 406, 1080);
+    return c.toDataURL("image/png");
+  }
+  const f = face(x), [c, g] = sideways();
+  g.font = F(64, 800); g.fillText((f.pre || x.sub || "") + "", 609, 110);
+  fitText(g, f.big, 460, 1120, 520); g.fillText(f.big, 609, 640);
+  g.font = F(60, 800); g.fillText("CHUTE " + String(x.chute).padStart(3, "0"), 609, 770);
+  return c.toDataURL("image/png");
+}
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const store = { get(k, d) { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch (e) { return d; } },
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} } };
+
+// What a card shows: big = the part people read off the chute / gaylord, small = the rest.
+function face(x) {
+  if (x.g === "time") return { big: x.hh, sm: HUB_SHORT + " " + x.md };
+  if (x.g === "plain") return { big: x.name, sm: x.city ? "simple" : "propio · custom" };
+  if (x.g === "rst") return { big: x.name.split(" ")[1], sm: x.sub + " · " + (x.route || "").split("-")[0] };
+  const i = x.name.lastIndexOf("-");
+  if (x.g === "station" && i > 0) return { big: x.name.slice(i + 1), sm: "rampa " + x.chute, pre: x.name.slice(0, i) };
+  return { big: x.name, sm: "rampa " + x.chute };
+}
+function card(x) {
+  const f = face(x);
+  return '<button class="card" data-id="' + esc(x.id) + '"><span class="big' + (f.big.length > 5 ? " long" : "") + '">' + esc(f.big) + '</span><span class="sm">' + esc((SHOWPRE && f.pre ? f.pre + " · " : "") + f.sm) + "</span>" +
+    (["Pendiente", "Reservado", "Libre"].includes(x.type) ? '<span class="tag">' + esc(x.type) + "</span>" : "") + "</button>";
+}
+const grid = (xs) => xs.length ? '<div class="grid">' + xs.map(card).join("") + "</div>" : '<div class="empty">Nada · Nothing</div>';
+const tile = (href, b, span, dark) => '<a class="tile' + (dark ? " dark" : "") + '" href="' + href + '"><b>' + b + "</b><span>" + span + "</span></a>";
+const count = (f) => ALL.filter(f).length;
+// Hub (.H) chutes come in two rows: side 2 has the low numbers (049 and up), side 1 the mirror ones (188 and up).
+const side2 = (x) => x.g === "city" && x.chute < SIDE_SPLIT, side1 = (x) => x.g === "city" && x.chute >= SIDE_SPLIT;
+const RST_STATION = (ALL.find((x) => x.g === "rst") || {}).route?.split("-")[0] || "";
+
+function home() {
+  const recent = store.get("recent", []).map(byId).filter(Boolean);
+  return '<div class="note">Elige la etiqueta, cuántas, e IMPRIMIR. Salen en la impresora de etiquetas. · Pick a sticker, how many, PRINT.</div>' +
+    '<button class="tile dark" data-id="t:now" style="width:100%;min-height:0;margin-bottom:6px"><b>⏱ Etiqueta de hora</b><span>Time label · ' + esc(timeNow().md + " " + timeNow().hh) + ' · 2 (frente + atrás)</span></button>' +
+    (recent.length ? '<div class="sec">Recientes</div>' + grid(recent) : "") +
+    '<div class="sec">Grupos</div><div class="tiles">' +
+    (RST_STATION ? tile("#rst/R", "R · S · T", RST_STATION + " gaylords · " + count((x) => x.g === "rst"), true) : "") +
+    tile("#station", "Estaciones", ORDER.slice(0, 3).join(", ") + "… · " + count((x) => x.g === "station")) +
+    tile("#city/2", "Hubs lado 2", "side 2 · " + count(side2)) +
+    tile("#city/1", "Hubs lado 1", "side 1 · " + count(side1)) +
+    tile("#plain", "Hubs simples", "solo PHX, STL… grande · " + PLAIN.length) +
+    tile("#custom", "Código propio", "escribe cualquier código · custom", true) +
+    tile("#other", "Otros", "NOREAD, libres · " + count((x) => x.g === "other")) + "</div>";
+}
+function view(route) {
+  const [g, sub] = route.split("/");
+  if (g === "rst") {
+    const L = ["R", "S", "T"].includes(sub) ? sub : "R";
+    return ["R · S · T  " + RST_STATION, '<div class="seg">' + ["R", "S", "T"].map((l) => '<a href="#rst/' + l + '" class="' + (l === L ? "on" : "") + '">' + l + "</a>").join("") + "</div>" +
+      grid(ALL.filter((x) => x.g === "rst" && x.sub === L))];
+  }
+  if (g === "station" && sub) {
+    const xs = ALL.filter((x) => x.g === "station" && x.sub === sub);
+    const main = xs.filter((x) => !["Pendiente", "Reservado"].includes(x.type)), rest = xs.filter((x) => !main.includes(x));
+    return [sub, grid(main) + (rest.length ? '<div class="sec">Pendientes · sin regla</div>' + grid(rest) : "")];
+  }
+  if (g === "station") {
+    const subs = ORDER.filter((s) => ALL.some((x) => x.g === "station" && x.sub === s));
+    return ["Estaciones", '<div class="tiles">' + subs.map((s) => tile("#station/" + s, s, count((x) => x.g === "station" && x.sub === s) + " rampas")).join("") + "</div>"];
+  }
+  if (g === "city") {
+    const f = sub === "2" ? side2 : sub === "1" ? side1 : (x) => x.g === "city";
+    return [sub ? "Hubs lado " + sub : "Hubs", grid(ALL.filter(f).sort((a, b) => a.chute - b.chute))];
+  }
+  if (g === "plain") return ["Hubs simples", '<div class="note">Solo el código del hub, letras grandes. · Plain hub stickers.</div>' + grid(PLAIN)];
+  if (g === "custom") return ["Código propio", '<div class="note">Escribe el código (máx. ' + PMAX + ' letras/números) y toca IMPRIMIR. · Type any code.</div>' +
+    '<input id="cc" autocomplete="off" autocapitalize="characters" maxlength="' + PMAX + '" placeholder="Ej: VCT01, PHX, PALLET 3" style="width:100%;font:inherit;font-size:28px;font-weight:900;padding:14px;border:2px solid #111;border-radius:10px;text-transform:uppercase">' +
+    '<button id="ccgo" style="margin-top:12px;width:100%;border:0;border-radius:12px;padding:18px;font:inherit;font-size:20px;font-weight:900;background:#111;color:#fff;text-transform:uppercase">Ver e imprimir</button>'];
+  if (g === "other") {
+    const xs = ALL.filter((x) => x.g === "other");
+    const by = {};
+    xs.forEach((x) => (by[x.type || "Otros"] = by[x.type || "Otros"] || []).push(x));
+    return ["Otros", Object.keys(by).map((k) => '<div class="sec">' + esc(k) + "</div>" + grid(by[k])).join("")];
+  }
+  return ["Etiquetas", home()];
+}
+function search(q) {
+  const t = q.toUpperCase().replace(/\s+/g, " ").trim();
+  const num = /^\d{1,3}$/.test(t) ? Number(t) : null;
+  const words = t.split(" ").filter(Boolean);
+  const pad = (w) => (/^\d{1,2}$/.test(w) ? w.padStart(3, "0") : w);
+  const hits = ALL.filter((x) => {
+    if (num !== null && x.chute === num) return true;
+    const hay = (x.name + " " + (x.route || "") + " " + (x.sub || "") + " " + (x.type || "")).toUpperCase();
+    return words.every((w) => hay.includes(w) || hay.includes(pad(w)));
+  });
+  hits.sort((a, b) => (b.chute === num) - (a.chute === num));
+  const ph = PLAIN.filter((x) => words.every((w) => x.name.includes(w.replace(/[.]H$/, ""))));
+  return (ph.length ? '<div class="sec">Simples</div>' + grid(ph) : "") + (ph.length && hits.length ? '<div class="sec">Rampas</div>' : "") + (hits.length || !ph.length ? grid(hits.slice(0, 120)) : "");
+}
+let SHOWPRE = false; // station prefix on cards: only where the page title doesn't already say it
+function render() {
+  const q = $("q").value.trim();
+  const route = location.hash.slice(1);
+  SHOWPRE = !!q || !route;
+  let title, body;
+  if (q) [title, body] = ["Buscar", search(q)];
+  else [title, body] = view(route);
+  $("title").textContent = title;
+  $("back").hidden = !route && !q;
+  $("main").innerHTML = body;
+}
+
+// ----- the bottom sheet -----
+let cur = null, n = Math.min(15, store.get("lastN", 10));
+const CHIPS = [1, 2, 5, 10, 15];
+function setN(v) {
+  n = Math.max(1, Math.min(MAX, v));
+  $("n").textContent = n;
+  $("print").textContent = "Imprimir " + n;
+  $("chips").querySelectorAll("button").forEach((b) => b.classList.toggle("on", Number(b.dataset.n) === n));
+}
+$("chips").innerHTML = CHIPS.map((c) => '<button data-n="' + c + '">' + c + "</button>").join("");
+function open(id) {
+  cur = byId(id);
+  if (!cur) return;
+  cur = { ...cur };
+  const f = face(cur);
+  cur.img = cur.g === "plain" ? drawPlain(cur) : cur.g === "time" ? drawTime(cur) : drawChute(cur);
+  $("pimg").src = cur.img;
+  $("pimg").className = cur.g === "rst" ? "" : "side";
+  if (cur.g === "time") $("pname").innerHTML = "Hora " + esc(cur.hh) + "<small>" + esc(HUB_SHORT + " " + cur.md) + " · una al frente, una atrás · front + back</small>";
+  else $("pname").innerHTML = esc(cur.g === "rst" ? cur.name + " · " + RST_STATION : cur.name) + "<small>" + (cur.g === "rst" ? "Gaylord " + esc(cur.route) : cur.g === "plain" ? esc(f.sm) : "Rampa " + cur.chute + (cur.type ? " · " + esc(cur.type) : "")) + "</small>";
+  setN(cur.g === "time" ? 2 : n);
+  $("print").disabled = false;
+  $("shade").hidden = $("sheet").hidden = false;
+}
+function close() {
+  $("shade").hidden = $("sheet").hidden = true;
+  if (cur && cur.g === "time") n = Math.min(15, store.get("lastN", 10));
+  cur = null;
+  if (location.hash === "#time") history.replaceState(null, "", location.pathname + location.search);
+}
+function toast(text, bad) {
+  const t = $("toast");
+  t.textContent = text; t.className = bad ? "bad" : ""; t.hidden = false;
+  clearTimeout(toast.t); toast.t = setTimeout(() => (t.hidden = true), bad ? 7000 : 4500);
+}
+async function print() {
+  if (!cur) return;
+  const x = cur, k = n;
+  $("print").disabled = true; $("print").textContent = "Enviando…";
+  try {
+    const body = x.g === "time" ? { time: x.name, img: x.img, copies: k } : x.g === "plain" ? { text: x.name, city: x.city, img: x.img, copies: k } : { id: x.id, img: x.img, copies: k };
+    const r = await fetch(BASE + "/sticker", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+    const d = await r.json();
+    if (!r.ok || !d.ok) throw new Error(d.error || "Error");
+    if (x.g !== "time") {
+      store.set("lastN", k);
+      store.set("recent", [x.id, ...store.get("recent", []).filter((i) => i !== x.id)].slice(0, 6));
+    }
+    close(); render();
+    if (d.already) { toast("Ya está en la fila — espera, va a salir. · Already in line, it's coming."); dot(d.printer); return; }
+    toast(d.printer ? "✓ " + k + " × " + d.name + " — imprimiendo" : "Enviado, pero la impresora está apagada. Saldrán al encenderla (hasta 30 min).", !d.printer);
+    dot(d.printer);
+  } catch (e) {
+    $("print").disabled = false; setN(n);
+    toast(e.message === "Failed to fetch" ? "Sin internet. Intenta otra vez." : e.message, true);
+  }
+}
+function dot(on) { $("dot").className = "dot " + (on ? "on" : "off"); $("dot").title = on ? "Impresora encendida" : "Impresora apagada"; }
+async function status() { try { dot((await (await fetch(BASE + "/stickers/status", { cache: "no-store" })).json()).printer); } catch (e) {} }
+
+document.addEventListener("click", (e) => {
+  const c = e.target.closest(".card, .tile[data-id]");
+  if (c) return open(c.dataset.id);
+  if (e.target.id === "ccgo") {
+    const t = cleanCode($("cc").value);
+    if (!t) return toast("Solo letras, números, - . / # (máx. " + PMAX + ").", true);
+    return open("u:" + t);
+  }
+  const chip = e.target.closest("#chips button");
+  if (chip) setN(Number(chip.dataset.n));
+});
+document.addEventListener("keydown", (e) => { if (e.key === "Enter" && e.target.id === "cc") { e.preventDefault(); $("ccgo").click(); } });
+$("minus").onclick = () => setN(n - 1);
+$("plus").onclick = () => setN(n + 1);
+$("print").onclick = print;
+$("cancel").onclick = close;
+$("shade").onclick = close;
+$("back").onclick = () => { if ($("q").value) { $("q").value = ""; render(); } else { const r = location.hash.slice(1); location.hash = r.startsWith("rst") || r.startsWith("city") || !r.includes("/") ? "" : r.split("/")[0]; } };
+$("q").oninput = render;
+window.addEventListener("hashchange", () => { $("q").value = ""; render(); window.scrollTo(0, 0); });
+render();
+if (location.hash === "#time") open("t:now"); // straight from the "Time label" button on the scan page
+status();
+setInterval(status, 30000);
+</script></body></html>

@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<meta name="color-scheme" content="light">
+<meta http-equiv="refresh" content="300">
+<title>Unsorted trucks · HOU.H</title>
+<style>
+:root { --bg: #f7f8fa; --card: #fff; --text: #262626; --muted: #8c8c8c; --line: #e8e8e8; --accent: #ff4800;
+        --top: #001529; --topsub: #a3b1bf; --bad: #cf1322; --bad-bg: #fff1f0; --warn: #ad6800; --warn-bg: #fffbe6;
+        --ok: #389e0d; --ok-bg: #f6ffed; }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text);
+       font: 14px/1.4 "Helvetica Neue", Helvetica, "PingFang SC", "Microsoft YaHei", Arial, sans-serif; }
+header { background: var(--top); color: #fff; padding: 12px 16px; }
+h1 { font-size: 19px; font-weight: 600; margin: 0; }
+.sub { color: var(--topsub); font-size: 13px; margin-top: 2px; }
+main { padding: 0 16px 32px; max-width: 900px; margin: 0 auto; }
+.strip { background: var(--card); border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px; margin-top: 12px; }
+.strip b { font-weight: 700; }
+.stale { color: var(--bad); font-weight: 700; }
+.truck { background: var(--card); border: 1px solid var(--line); border-radius: 6px; margin-top: 12px; overflow: hidden; }
+.truck.first { border: 2px solid var(--bad); }
+.head { display: flex; align-items: center; gap: 12px; padding: 12px; }
+.rank { flex: none; width: 34px; height: 34px; border-radius: 50%; background: var(--top); color: #fff;
+        display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 16px; }
+.truck.first .rank { background: var(--bad); }
+.who { flex: 1; min-width: 0; }
+.who .from { font-size: 18px; font-weight: 700; }
+.who small { display: block; color: var(--muted); font-size: 12px; }
+.timer { flex: none; text-align: right; font-variant-numeric: tabular-nums; }
+.timer .t { font-size: 24px; font-weight: 700; }
+.timer small { display: block; color: var(--muted); font-size: 12px; }
+.t.red { color: var(--bad); } .t.amber { color: var(--warn); } .t.green { color: var(--ok); }
+.nums { display: flex; gap: 16px; padding: 0 12px 10px; font-size: 13px; color: var(--muted); flex-wrap: wrap; }
+.nums b { color: var(--text); font-size: 15px; }
+.bags { border-top: 1px solid var(--line); padding: 10px 12px; display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+.bag { border: 2px solid var(--bad); border-radius: 4px; padding: 6px 8px; }
+.bag.part { border: 1px solid var(--line); opacity: .75; }
+.bag .code { font-size: 20px; font-weight: 800; letter-spacing: .5px; font-variant-numeric: tabular-nums; }
+.bag small { display: block; color: var(--muted); font-size: 11px; word-break: break-all; }
+.bag .n { font-size: 13px; }
+.foot { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 8px 12px; border-top: 1px solid var(--line); font-size: 13px; }
+.foot a { color: var(--accent); font-weight: 600; text-decoration: none; }
+.more { border: 0; background: none; color: var(--accent); font: inherit; font-weight: 600; padding: 0; cursor: pointer; }
+.almost { margin-top: 16px; font-size: 13px; color: var(--muted); }
+.empty { background: var(--card); border: 1px solid var(--line); border-radius: 6px; padding: 14px; margin-top: 12px; color: var(--muted); }
+.bldg { display: inline-block; vertical-align: middle; font-size: 12px; font-weight: 700; padding: 1px 7px; border-radius: 10px; margin-left: 6px; border: 1px solid; }
+.bldg.b2 { color: #0958d9; background: #e6f4ff; border-color: #91caff; }
+.bldg.b1 { color: #531dab; background: #f9f0ff; border-color: #d3adf7; }
+.bldg.guess { border-style: dashed; }
+.chips { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+.chip { border: 1px solid var(--line); background: var(--bg); color: var(--text); border-radius: 14px; padding: 4px 12px; font: inherit; font-size: 13px; cursor: pointer; }
+.chip.on { background: var(--top); border-color: var(--top); color: #fff; font-weight: 600; }
+</style>
+</head>
+<body>
+<header><h1>Unsorted trucks</h1><div class="sub" id="sub"></div></header>
+<main id="main"></main>
+<script>
+const DATA = {"updated":"2026-11-25 21:25:19","day":"2026-11-25","wms":{"waiting":23110,"older":1840},"trucks":[{"task":"TT2611253301","from":"BOS.H","arrived":"2026-11-24 19:28:19","where":"Building 1","state":"unloaded","kind":"","total":2400,"left":1131,"gaylords":6,"open":3,"in_full":1089,"unloaded":["2026-11-24 19:36:19","2026-11-24 20:18:19"],"by":["Unload crew 2"],"noscan_full":0,"bags":[{"bag":"GL26112500100","code":"0100","left":317,"of":317,"full":true,"noscan":false,"to":["ACT01","SGR01"]},{"bag":"GL26112500101","code":"0101","left":363,"of":370,"full":true,"noscan":false,"to":["VCT01","SGR01"]},{"bag":"GL26112500102","code":"0102","left":409,"of":423,"full":true,"noscan":false,"to":["BRO01","SGR01"]},{"bag":"GL26112500103","code":"0103","left":3,"of":316,"full":false,"noscan":false,"to":["HRL01","SGR01"]},{"bag":"GL26112500104","code":"0104","left":14,"of":369,"full":false,"noscan":false,"to":["SJT01","SGR01"]},{"bag":"GL26112500105","code":"0105","left":25,"of":422,"full":false,"noscan":false,"to":["GGG01","SGR01"]}]},{"task":"TT2611253302","from":"PHX.H","arrived":"2026-11-25 14:28:19","where":"Building 2?","state":"unloaded","kind":"","total":2650,"left":1411,"gaylords":6,"open":4,"in_full":1372,"unloaded":["2026-11-25 14:36:19","2026-11-25 15:18:19"],"by":["Unload crew 2"],"noscan_full":1,"bags":[{"bag":"GL26112500200","code":"0200","left":354,"of":354,"full":true,"noscan":false,"to":["VCT01","SGR01"]},{"bag":"GL26112500201","code":"0201","left":400,"of":407,"full":true,"noscan":false,"to":["BRO01","SGR01"]},{"bag":"GL26112500202","code":"0202","left":286,"of":300,"full":true,"noscan":false,"to":["HRL01","SGR01"]},{"bag":"GL26112500203","code":"0203","left":332,"of":353,"full":true,"noscan":false,"to":["SJT01","SGR01"]},{"bag":"GL26112500204","code":"0204","left":14,"of":406,"full":false,"noscan":false,"to":["GGG01","SGR01"]},{"bag":"GL26112500205","code":"0205","left":25,"of":299,"full":false,"noscan":false,"to":["TXK01","SGR01"]}]},{"task":"TT2611253303","from":"MSP.H","arrived":"2026-11-25 19:53:19","where":"Building 1","state":"not unloaded","kind":"","total":1980,"left":1916,"gaylords":6,"open":6,"in_full":1916,"unloaded":["2026-11-25 20:01:19","2026-11-25 20:43:19"],"by":["Unload crew 2"],"noscan_full":0,"bags":[{"bag":"GL26112500300","code":"0300","left":391,"of":391,"full":true,"noscan":true,"to":["BRO01","SGR01"]},{"bag":"GL26112500301","code":"0301","left":277,"of":284,"full":true,"noscan":true,"to":["HRL01","SGR01"]},{"bag":"GL26112500302","code":"0302","left":323,"of":337,"full":true,"noscan":true,"to":["SJT01","SGR01"]},{"bag":"GL26112500303","code":"0303","left":369,"of":390,"full":true,"noscan":true,"to":["GGG01","SGR01"]},{"bag":"GL26112500304","code":"0304","left":255,"of":283,"full":true,"noscan":true,"to":["TXK01","SGR01"]},{"bag":"GL26112500305","code":"0305","left":301,"of":336,"full":true,"noscan":true,"to":["SHV01","SGR01"]}]}],"almost":[{"task":"TT2611253299","from":"STL.H","arrived":"2026-11-24 14:28:19","left":6,"total":2210,"gaylords":7,"where":"Building 1"}]};
+const SHOW = 12;
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const fmt = (n) => Number(n || 0).toLocaleString("en-US");
+// WMS times are hub time (Central); work out the offset from UTC for that moment so timers are right on any phone.
+function houston(text) {
+  const [d, t] = text.split(" "); const [y, mo, da] = d.split("-").map(Number); const [h, mi, s] = (t || "0:0:0").split(":").map(Number);
+  const guess = Date.UTC(y, mo - 1, da, h, mi, s || 0);
+  const parts = new Intl.DateTimeFormat("en-US", { timeZone: "America/Chicago", hourCycle: "h23", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" }).formatToParts(new Date(guess));
+  const p = Object.fromEntries(parts.map((x) => [x.type, x.value]));
+  const shown = Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour, +p.minute, +p.second);
+  return guess + (guess - shown);
+}
+function since(ms) {
+  const s = Math.max(0, Math.floor((Date.now() - ms) / 1000));
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), x = s % 60;
+  return h + ":" + String(m).padStart(2, "0") + ":" + String(x).padStart(2, "0");
+}
+const clock = (text) => (text || "").slice(5, 16).replace("-", "/");
+// Which building: Building 1 or Building 2, from where the unloaders were that day on the shift schedule; "?" = a guess.
+const PICK_KEY = "unsorted_building";
+let pick = "all";
+try { pick = localStorage.getItem(PICK_KEY) || "all"; } catch (e) {}
+const place = (w) => String(w || "").replace("?", "");
+const shown = (w) => pick === "all" || place(w) === pick;
+const tag = (w) => w ? '<span class="bldg ' + (place(w) === "Building 2" ? "b2" : "b1") + (String(w).endsWith("?") ? " guess" : "") + '">' + esc(w) + "</span>" : "";
+function render() {
+  const main = document.getElementById("main");
+  if (!DATA || !DATA.trucks) { main.innerHTML = '<div class="empty">No data yet.</div>'; return; }
+  const upd = houston(DATA.updated);
+  const ageMin = Math.round((Date.now() - upd) / 60000);
+  document.getElementById("sub").textContent = "Oldest truck first · updated " + clock(DATA.updated) + " (" + ageMin + " min ago)";
+  const trucks = DATA.trucks.filter((t) => shown(t.where));
+  const chips = [["all", "All", DATA.trucks.length], ["Building 1", "Building 1", DATA.trucks.filter((t) => place(t.where) === "Building 1").length],
+    ["Building 2", "Building 2", DATA.trucks.filter((t) => place(t.where) === "Building 2").length]];
+  let html = '<div class="strip">' + (ageMin > 30 ? '<div class="stale">Not updated for ' + ageMin + ' minutes: the ops host may be offline.</div>' : "") +
+    "<div><b>" + trucks.length + "</b> truckloads · <b>" + trucks.reduce((a, t) => a + t.open, 0) + "</b> full gaylords · <b>" + fmt(trucks.reduce((a, t) => a + t.in_full, 0)) + "</b> packages in them</div>" +
+    "<div>WMS still to sort, both buildings: <b>" + fmt(DATA.wms.waiting) + "</b> (from before today's shift: <b>" + fmt(DATA.wms.older) + "</b>)</div>" +
+    '<div class="chips">' + chips.map(([k, label, n]) => '<button class="chip' + (pick === k ? " on" : "") + '" data-pick="' + k + '">' + label + " " + n + "</button>").join("") + "</div></div>";
+  if (!trucks.length) html += '<div class="empty">' + (DATA.trucks.length ? "No unsorted trucks here." : "Every truck is sorted.") + "</div>";
+  trucks.forEach((t, i) => {
+    const full = t.bags.filter((b) => b.full), part = t.bags.filter((b) => !b.full);
+    const card = (b, hidden) => '<div class="bag' + (b.full ? "" : " part") + '"' + (hidden ? ' data-more="1" hidden' : "") + '><div class="code">' + esc(b.code) +
+      '</div><div class="n">' + fmt(b.left) + " of " + fmt(b.of) + " left</div><small>" + esc(b.bag) + (b.noscan ? " · not scanned in" : "") + "</small><small>" + esc(b.to.join(", ")) + "</small></div>";
+    const bags = full.map((b, j) => card(b, j >= SHOW)).join("") + part.map((b) => card(b, true)).join("");
+    const extra = Math.max(0, full.length - SHOW) + part.length;
+    html += '<div class="truck' + (i === 0 ? " first" : "") + '"><div class="head"><div class="rank">' + (i + 1) + '</div><div class="who"><div class="from">' + esc(t.from) + tag(t.where) +
+      "</div><small>Arrived " + clock(t.arrived) + " · " + esc(t.task) + "</small><small>" +
+      (t.state === "not unloaded" ? "<b>NOT UNLOADED</b>: no gaylord scanned in yet"
+        : t.state === "no scans" ? "<b>UNLOADED WITHOUT SCANS</b>: no gaylord scanned in, but its packages are being sorted"
+        : "Unloaded " + clock(t.unloaded[0]) + "–" + esc((t.unloaded[1] || "").slice(11, 16)) + (t.by.length ? " by " + esc(t.by.join(", ")) : "") +
+          (t.noscan_full ? " · <b>" + t.noscan_full + " gaylords never scanned in</b>" : "")) + '</small></div><div class="timer"><div class="t" data-at="' + houston(t.arrived) + '"></div><small>since arrival</small></div></div>' +
+      '<div class="nums"><span><b>' + t.open + "</b> of " + t.gaylords + " gaylords still full</span><span><b>" + fmt(t.left) + "</b> of " + fmt(t.total) + " packages not sorted</span></div>" +
+      '<div class="bags">' + bags + "</div>" +
+      '<div class="foot">' + (extra ? '<button class="more">Show ' + extra + " more" + (part.length ? " (" + part.length + " partly done)" : "") + "</button>" : "<span></span>") +
+      '<a href="' + location.pathname.replace(/[/]$/, "") + "/csv/" + encodeURIComponent(t.task) + '">Gaylord list (CSV)</a></div></div>';
+  });
+  const almost = (DATA.almost || []).filter((a) => shown(a.where));
+  if (almost.length) {
+    html += '<div class="almost"><b>Stray packages only</b> (no full gaylord left; likely problem parcels or mis-sorts): ' +
+      almost.map((a) => esc(a.from) + (a.where ? " " + esc(a.where) : "") + " " + clock(a.arrived) + " · " + fmt(a.left) + ' <a href="' + location.pathname.replace(/[/]$/, "") + "/csv/" + encodeURIComponent(a.task) + '">CSV</a>').join(" &nbsp;|&nbsp; ") + "</div>";
+  }
+  html += '<div class="almost">"Not sorted" = not in any bag made at the hub yet and no successful sort on the machine. "Not scanned in" = the origin loaded that gaylord on this truck and nobody has scanned it in here: still on the trailer, or unloaded with no scan. Red box = gaylord still mostly full. Timer: green under 12 h, amber 12–24 h, red over 24 h. Building 1 / Building 2 = where the unloaders worked that day on the shift schedule; dashed with ? = a guess (they were off that day).</div>';
+  main.innerHTML = html;
+  main.querySelectorAll(".chip").forEach((b) => b.addEventListener("click", () => {
+    pick = b.dataset.pick;
+    try { localStorage.setItem(PICK_KEY, pick); } catch (e) {}
+    render();
+  }));
+  main.querySelectorAll(".more").forEach((b) => b.addEventListener("click", () => {
+    b.closest(".truck").querySelectorAll("[data-more]").forEach((x) => (x.hidden = false)); b.remove();
+  }));
+  tick();
+}
+function tick() {
+  document.querySelectorAll(".t[data-at]").forEach((el) => {
+    const ms = Number(el.dataset.at); const h = (Date.now() - ms) / 3600000;
+    el.textContent = since(ms);
+    el.className = "t " + (h >= 24 ? "red" : h >= 12 ? "amber" : "green");
+  });
+}
+render();
+setInterval(tick, 1000);
+</script>
+</body>
+</html>

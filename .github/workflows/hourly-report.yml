@@ -1,0 +1,84 @@
+name: Hourly sort report
+run-name: "Hourly sort report: ${{ github.event_name == 'schedule' && 'hourly' || inputs.command }}"
+
+# Reads the WMS bag list, saves the per-destination table, draws it and posts it to the team chat
+# (hubops/hourly_report.py). Out of the box it runs against the WMS simulator started in the job and posts in demo
+# mode (the message is printed and kept with the run's files), so it reaches nothing outside the runner. To point
+# it at a real system, set the repository secrets below; with none set, nothing changes.
+#
+#   HUBOPS_WMS_URL, HUBOPS_WMS_TOKEN   the warehouse system and its token (unset = the simulator)
+#   HUBOPS_CHAT_WEBHOOK                the team chat webhook (unset = demo mode, stdout)
+#   HUBOPS_REPORT_CHAT                 the chat the report goes to
+#   HUBOPS_ALERT_CHAT                  the chat failures go to
+
+on:
+  schedule:
+    # A few minutes past every hour; the script itself skips the quiet morning hours and hours already posted.
+    - cron: "4 * * * *"
+  workflow_dispatch:
+    inputs:
+      command:
+        description: "hourly = read, draw and post; preview = read and draw only, nothing posted"
+        type: choice
+        default: preview
+        options: [hourly, preview]
+      skip_if_done:
+        description: "Do nothing if this hour was already reported"
+        type: boolean
+        default: false
+
+# Never two reports at the same moment.
+concurrency:
+  group: hourly-report
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      TZ: America/Chicago
+      HUBOPS_WMS_URL: ${{ secrets.HUBOPS_WMS_URL || 'http://127.0.0.1:8765' }}
+      HUBOPS_WMS_TOKEN: ${{ secrets.HUBOPS_WMS_TOKEN || 'demo' }}
+      HUBOPS_CHAT_WEBHOOK: ${{ secrets.HUBOPS_CHAT_WEBHOOK }}
+      REPORT_CHAT: ${{ secrets.HUBOPS_REPORT_CHAT || 'demo-report-chat' }}
+      ALERT_CHAT: ${{ secrets.HUBOPS_ALERT_CHAT || 'demo-alert-chat' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install the picture renderer
+        run: |
+          pip install playwright
+          python -m playwright install --with-deps chromium
+      - name: Start the WMS simulator
+        if: env.HUBOPS_WMS_URL == 'http://127.0.0.1:8765'
+        run: |
+          python hubsim/server.py --quiet --no-report &
+          for i in $(seq 1 60); do
+            curl -s -o /dev/null -X POST -H "Authorization: Bearer demo" "$HUBOPS_WMS_URL/api/places" -d '{}' && break
+            sleep 1
+          done
+      - name: Draw a preview
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.command == 'preview' }}
+        run: python hubops/hourly_report.py --dry-run
+      - name: Update the report and post it
+        if: ${{ github.event_name == 'schedule' || inputs.command == 'hourly' }}
+        run: >-
+          python hubops/hourly_report.py --chat "$REPORT_CHAT" --alert-chat "$ALERT_CHAT"
+          ${{ (github.event_name == 'schedule' || inputs.skip_if_done) && '--skip-if-done' || '' }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: hourly-report
+          path: |
+            data/hourly-report.png
+            data/hourly-report.html
+            data/hourly-report.csv
+            data/chat-outbox.jsonl
+          if-no-files-found: ignore
+          retention-days: 3

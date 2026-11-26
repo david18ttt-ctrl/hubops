@@ -1,0 +1,230 @@
+<!doctype html><html lang="en"><head>
+<script>
+(() => {
+  const LABEL = {"bag":"BG012611251011-043","route":"VCT01-017","dest":"VCT01","chute":"43","pcs":77,"date":"2026-11-25 21:36:03","origin":"HOU.H","operator":"Sorter 1","merge":[],"pkg":"PKG261125689488444","note":""};
+  let asked = 0, at = Date.now();
+  const ok = (data) => Promise.resolve(new Response(JSON.stringify(data), { headers: { "content-type": "application/json" } }));
+  const real = window.fetch.bind(window);
+  window.fetch = (url, init) => {
+    const u = String(url);
+    if (u === "/s/demo-scan-0000000000" + "/req") { at = Date.now(); asked = 0; return ok({ id: 1 }); }
+    if (u === "/s/demo-scan-0000000000" + "/req/1") {
+      asked++; // first answer: still looking; then looked up and printed
+      return ok({ id: 1, code: LABEL.pkg, at, status: asked < 2 ? "new" : "done", msg: "", label: LABEL,
+        printedAt: asked < 2 ? null : Date.now(), host: true, printer: true });
+    }
+    if (u.endsWith("/stickers/status")) return ok({ printer: true });
+    if (u.endsWith("/sticker")) return ok({ ok: true, name: "sticker", copies: 1, printer: true });
+    if (u.startsWith("/s/demo-scan-0000000000")) return ok({ ok: true });
+    return real(url, init);
+  };
+})();
+</script><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex"><title>Box label</title><style>
+:root { color-scheme: light; }
+* { box-sizing: border-box; }
+body { margin: 0; background: #f2f2f0; color: #111; font: 17px "Segoe UI", -apple-system, Roboto, Arial, sans-serif; }
+main { max-width: 560px; margin: 0 auto; padding: 16px; }
+h1 { font-size: 26px; font-weight: 900; letter-spacing: -0.5px; margin: 6px 0 4px; text-transform: uppercase; }
+button, .btn { font: inherit; font-weight: 800; font-size: 18px; padding: 18px; border: 2px solid #111; border-radius: 4px;
+  background: #111; color: #fff; width: 100%; display: block; text-align: center; cursor: pointer; text-transform: uppercase; letter-spacing: .3px; }
+button.alt, .btn.alt { background: #fff; color: #111; }
+button:active, .btn:active { transform: translateY(1px); }
+button:disabled { opacity: .4; }
+.row { display: flex; gap: 10px; margin-bottom: 10px; }
+.row > * { flex: 1; }
+input[type=text] { font: inherit; font-size: 18px; width: 100%; padding: 16px; border-radius: 4px; border: 2px solid #111; background: #fff; color: #111; }
+.card { background: #fff; border: 2px solid #111; border-radius: 4px; padding: 16px; margin: 12px 0; }
+.big { font-size: 30px; font-weight: 900; letter-spacing: -0.5px; }
+.muted { color: #555; font-size: 15px; }
+.ok { color: #0a7d32; } .bad { color: #c41a1a; } .wait { color: #9a6200; }
+video { width: 100%; border: 2px solid #111; border-radius: 4px; background: #000; display: block; }
+[hidden] { display: none !important; }
+@media (prefers-color-scheme: dark) {
+  :root { color-scheme: dark; }
+  body { background: #000; color: #f5f5f5; }
+  button, .btn { background: #f5f5f5; color: #000; border-color: #f5f5f5; }
+  button.alt, .btn.alt { background: #000; color: #f5f5f5; }
+  input[type=text], .card { background: #111; color: #f5f5f5; border-color: #f5f5f5; }
+  video { border-color: #f5f5f5; }
+  .muted { color: #aaa; } .ok { color: #3ddc76; } .bad { color: #ff5c5c; } .wait { color: #ffc23d; }
+}
+</style></head><body><main>
+<a href="label-stickers-preview.html#time" style="display:block;margin:0 0 8px;padding:14px;border:2px solid #111;border-radius:4px;background:#111;color:#fff;font-weight:900;font-size:20px;text-decoration:none">⏱ Etiqueta de hora → <span style="font-weight:600;color:#ccc">Time label</span></a>
+<a href="label-stickers-preview.html" style="display:block;margin:0 0 12px;padding:12px 14px;border:2px solid #111;border-radius:4px;background:#fff;color:#111;font-weight:800;text-decoration:none">Etiquetas de rampa y R·S·T → <span style="font-weight:600;color:#555">Stickers</span></a>
+<h1>Etiqueta de caja</h1>
+<div class="muted" style="margin-bottom:12px">Escanea UN paquete de adentro de la caja, presiona IMPRIMIR y recoge la etiqueta en la mesa de clasificación.<br>Scan ONE package from inside the box, press PRINT, pick up the label at the sorting table.</div>
+<div class="row"><button id="cam">Escanear · Scan</button></div>
+<div class="row"><label class="btn alt" for="photo">Foto · Photo</label><input id="photo" type="file" accept="image/*" capture="environment" hidden></div>
+<video id="video" playsinline muted hidden></video>
+<div class="row"><input id="typed" type="text" placeholder="o escribe el número · or type the number" autocapitalize="characters" autocomplete="off"><button id="go" class="alt" style="flex:0 0 120px">Buscar</button></div>
+<div id="out"></div>
+</main>
+<script>
+const BASE = "/s/demo-scan-0000000000";
+const HUB = "HOU.H";
+const READ = { formats: ["Code128", "QRCode", "DataMatrix", "Code39"], maxNumberOfSymbols: 12, tryHarder: true };
+// Bag, gaylord and truck labels in the same frame are not packages.
+const BAG = /^(BG\d{11,15}-\d{1,3}|GL\d{6,}|SB\d{6,}|TT\d{6,})$/;
+const CODE = /^[A-Z0-9-]{8,40}$/;
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+let lib = null, stream = null, timer = 0, busy = false, poll = 0;
+function loadLib() {
+  if (!lib) lib = new Promise((ok, bad) => { const s = document.createElement("script"); s.src = "https://cdn.jsdelivr.net/npm/zxing-wasm@3.1.6/dist/iife/reader/index.js";
+    s.onload = () => ok(window.ZXingWASM); s.onerror = () => { lib = null; bad(new Error("Scanner didn't load. Check internet.")); };
+    document.head.appendChild(s); });
+  return lib;
+}
+function say(h) { $("out").innerHTML = '<div class="card">' + h + "</div>"; }
+// Package numbers first (the hub's own PKG numbers, then the longest: tracking numbers are long); bag labels are left out.
+function pick(texts) {
+  const c = [...new Set(texts.map((t) => String(t || "").trim().toUpperCase().replace(/\s+/g, "")))].filter((t) => CODE.test(t) && !BAG.test(t));
+  return c.sort((a, b) => (b.startsWith("PKG") - a.startsWith("PKG")) || b.length - a.length);
+}
+// Labels the worker looked up itself (ops host off): this phone draws the 4x6 label at 203 dpi, same layout as
+// the print page's, and sends it.
+let writer = null;
+function loadWriter() {
+  if (!writer) writer = new Promise((ok, bad) => { const keep = window.ZXingWASM; const s = document.createElement("script"); s.src = "https://cdn.jsdelivr.net/npm/zxing-wasm@3.1.6/dist/iife/writer/index.js";
+    s.onload = () => { const w = window.ZXingWASM; if (keep) window.ZXingWASM = keep; ok(w); }; s.onerror = () => { writer = null; bad(new Error("writer didn't load")); };
+    document.head.appendChild(s); });
+  return writer;
+}
+function svgImage(svg) {
+  return new Promise((ok, bad) => { const im = new Image(); im.onload = () => ok(im); im.onerror = bad;
+    im.src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg); });
+}
+async function drawLabel(x) {
+  const W = await loadWriter();
+  const D = 203, IN = (v) => Math.round(v * D), PT = (v) => Math.round(v / 72 * D);
+  const c = document.createElement("canvas"); c.width = IN(4); c.height = IN(6);
+  const g = c.getContext("2d");
+  g.fillStyle = "#fff"; g.fillRect(0, 0, c.width, c.height); g.fillStyle = "#000"; g.imageSmoothingEnabled = false;
+  const font = (pt, bold) => (bold ? "bold " : "") + PT(pt) + 'px "Arial Narrow", Arial, sans-serif';
+  const qr = await svgImage((await W.writeBarcode(x.bag, { format: "QRCode", scale: 4 })).svg);
+  const bar = await svgImage((await W.writeBarcode(x.bag, { format: "Code128", scale: 3 })).svg);
+  // Positions measured off the print page's own picture (812x1218), so both print the same.
+  const L = 52, R = c.width - 52;
+  g.drawImage(qr, 52, 46, 254, 254);
+  g.textBaseline = "alphabetic"; g.textAlign = "left";
+  g.font = font(10.5, true); g.fillText("Destination:", L, 333);
+  g.font = font(15); g.fillText("Chute: " + (x.chute ?? ""), 342, 95); g.fillText("Origin: " + (x.origin || HUB), 342, 150);
+  const route = String(x.route || ""), cut = route.lastIndexOf("-");
+  const dest = cut > 0 ? route.slice(cut + 1) : route, remark = cut > 0 ? route.slice(0, cut + 1) : "";
+  let size = 58; g.font = font(size, true);
+  while (g.measureText(dest).width > R - L && size > 8) { size--; g.font = font(size, true); }
+  g.textAlign = "center"; g.fillText(dest, c.width / 2, 540);
+  g.textAlign = "left"; g.font = font(10.5, true); g.fillText("Remark:", L, 670);
+  g.font = font(22, true); g.fillText(remark, L, 735);
+  const m = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}:\d{2}:\d{2})/.exec(String(x.date || ""));
+  const date = m ? m[4] + " " + m[2] + "/" + m[3] + "/" + m[1] : String(x.date || "");
+  g.drawImage(bar, 130, 905, 553, 152);
+  g.textAlign = "center"; g.font = font(15, true);
+  g.fillText(x.bag, c.width / 2, 1105); g.fillText("Date: " + date, c.width / 2, 1150);
+  return c.toDataURL("image/png");
+}
+async function sendPicture(id, label) {
+  let img = "";
+  try { img = await drawLabel(label); } catch (e) {} // no picture: the agent prints the facts with the printer's fonts
+  try { await fetch(BASE + "/img/" + id, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ img }) }); } catch (e) {}
+}
+
+async function send(codes) {
+  if (busy || !codes.length) return;
+  busy = true; stopCam();
+  say("Sending " + esc(codes[0]) + "…");
+  try {
+    const r = await fetch(BASE + "/req", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ codes }) });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || "error " + r.status);
+    follow(d.id, d.repeat);
+  } catch (e) { say('<span class="bad">Not sent: ' + esc(e.message) + "</span>"); busy = false; }
+}
+async function follow(id, repeat) {
+  clearTimeout(poll);
+  let j;
+  try { j = await (await fetch(BASE + "/req/" + id, { cache: "no-store" })).json(); } catch (e) { poll = setTimeout(() => follow(id, repeat), 2000); return; }
+  const L = j.label, age = (Date.now() - j.at) / 1000;
+  let h = '<div class="muted">Package ' + esc(j.code) + "</div>";
+  let again = false;
+  if (j.status === "draw") {
+    say(h + '<div class="wait big">Imprimiendo… · Printing…</div>');
+    await sendPicture(id, L);
+    poll = setTimeout(() => follow(id, repeat), 300);
+    return;
+  }
+  if (j.status === "new" || j.status === "cloud") {
+    h += '<div class="wait big">Buscando la caja… · Finding the box…</div>' + (age > 90 ? '<div class="bad">Lookup not answering. Try later.</div>' : "");
+  } else if (j.status === "error") {
+    h += '<div class="bad big">Sin etiqueta · No label</div><div>' + esc(j.msg) + "</div>";
+  } else {
+    h += '<div class="big">' + esc(L.route) + "</div><div>" + esc(L.bag) + " · " + esc(L.pcs) + " pcs · chute " + esc(L.chute) + "</div>" +
+      (L.note ? '<div class="wait">' + esc(L.note) + "</div>" : "");
+    if (j.printedAt) { h += '<div class="ok big">Impresa ✓ Printed</div><div>Recoge la etiqueta en la mesa de clasificación · Pick it up at the sorting table</div>'; again = true; }
+    else h += '<div class="wait big">Imprimiendo… · Printing…</div>' + (!j.printer ? '<div class="bad">The label printer is offline: the label prints when it\'s back on.</div>' : "");
+  }
+  if (repeat) h += '<div class="muted">Already sent in the last 15 minutes.</div>';
+  if (again) h += '<div class="row" style="margin-top:10px"><button class="alt" id="again">Imprimir otra vez · Print again</button></div>';
+  say(h);
+  if (again) $("again").onclick = async () => { $("again").disabled = true; const r = await (await fetch(BASE + "/again/" + id, { method: "POST" })).json(); repeat = false; if (r.ok) setTimeout(() => follow(id), 500); };
+  busy = j.status === "new" || j.status === "cloud" || (j.status === "done" && !j.printedAt);
+  if (busy && age < 1800) poll = setTimeout(() => follow(id, repeat), 2000);
+  else busy = false;
+}
+async function startCam() {
+  if (stream) { stopCam(); return; }
+  try {
+    const z = await loadLib();
+    stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1080 } } });
+    const v = $("video"); v.hidden = false; v.srcObject = stream; await v.play();
+    $("cam").textContent = "Parar · Stop"; say("Apunta a la etiqueta del paquete · Point at the package label.");
+    const cv = document.createElement("canvas"), cx = cv.getContext("2d", { willReadFrequently: true });
+    const loop = async () => {
+      if (!stream) return;
+      if (v.videoWidth) {
+        const k = Math.min(1, 1600 / Math.max(v.videoWidth, v.videoHeight));
+        cv.width = Math.round(v.videoWidth * k); cv.height = Math.round(v.videoHeight * k);
+        cx.drawImage(v, 0, 0, cv.width, cv.height);
+        try { const c = pick((await z.readBarcodes(cx.getImageData(0, 0, cv.width, cv.height), READ)).filter((r) => r.isValid !== false).map((r) => r.text));
+          if (c.length) { if (navigator.vibrate) navigator.vibrate(60); ask(c); return; } } catch (e) {}
+      }
+      timer = setTimeout(loop, 60);
+    };
+    loop();
+  } catch (e) { stopCam(); say('<span class="bad">' + esc(e && e.name === "NotAllowedError" ? "Camera blocked: allow the camera for this page, or use Take photo." : e.message || e) + "</span>"); }
+}
+// After a scan: show the package and wait for IMPRIMIR (so a wrong code doesn't print by itself).
+function ask(codes) {
+  stopCam();
+  say('<div class="muted">Paquete · Package</div><div class="big" style="word-break:break-all">' + esc(codes[0]) + '</div>' +
+    '<div class="row" style="margin-top:12px"><button id="yes">Imprimir · Print</button></div>' +
+    '<div class="row"><button class="alt" id="no">Escanear otro · Scan again</button></div>');
+  $("yes").onclick = () => send(codes);
+  $("no").onclick = () => { say("…"); startCam(); };
+}
+function stopCam() {
+  clearTimeout(timer);
+  if (stream) stream.getTracks().forEach((t) => t.stop());
+  stream = null; $("video").hidden = true; $("video").srcObject = null; $("cam").textContent = "Escanear · Scan";
+}
+$("cam").onclick = startCam;
+$("photo").onchange = async (e) => {
+  const f = e.target.files && e.target.files[0]; e.target.value = "";
+  if (!f) return;
+  say("Reading the photo…");
+  try {
+    const z = await loadLib();
+    const bmp = await createImageBitmap(f);
+    const k = Math.min(1, 2400 / Math.max(bmp.width, bmp.height));
+    const cv = document.createElement("canvas"); cv.width = Math.round(bmp.width * k); cv.height = Math.round(bmp.height * k);
+    const cx = cv.getContext("2d"); cx.drawImage(bmp, 0, 0, cv.width, cv.height);
+    const c = pick((await z.readBarcodes(cx.getImageData(0, 0, cv.width, cv.height), READ)).filter((r) => r.isValid !== false).map((r) => r.text));
+    if (!c.length) { say('<span class="bad">No barcode found in the photo. Get closer to the label, or type the number.</span>'); return; }
+    ask(c);
+  } catch (err) { say('<span class="bad">' + esc(err.message || err) + "</span>"); }
+};
+const typed = () => { const c = pick([$("typed").value]); if (!c.length) { say('<span class="bad">That doesn\'t look like a package number.</span>'); return; } $("typed").value = ""; ask(c); };
+$("go").onclick = typed;
+$("typed").addEventListener("keydown", (e) => { if (e.key === "Enter") typed(); });
+</script></body></html>

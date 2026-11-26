@@ -1,0 +1,203 @@
+<!doctype html><html lang="en"><head>
+<script>window.fetch = () => Promise.resolve(new Response(JSON.stringify({ version: "", queue: [], recent: [] })));</script><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex"><title>Label printer</title>
+<style>
+:root { color-scheme: light; }
+* { box-sizing: border-box; }
+body { margin: 0; background: #f2f2f0; color: #111; font: 17px "Segoe UI", -apple-system, Roboto, Arial, sans-serif; }
+main { max-width: 560px; margin: 0 auto; padding: 16px; }
+h1 { font-size: 26px; font-weight: 900; letter-spacing: -0.5px; margin: 6px 0 4px; text-transform: uppercase; }
+button, .btn { font: inherit; font-weight: 800; font-size: 18px; padding: 18px; border: 2px solid #111; border-radius: 4px;
+  background: #111; color: #fff; width: 100%; display: block; text-align: center; cursor: pointer; text-transform: uppercase; letter-spacing: .3px; }
+button.alt, .btn.alt { background: #fff; color: #111; }
+button:active, .btn:active { transform: translateY(1px); }
+button:disabled { opacity: .4; }
+.row { display: flex; gap: 10px; margin-bottom: 10px; }
+.row > * { flex: 1; }
+input[type=text] { font: inherit; font-size: 18px; width: 100%; padding: 16px; border-radius: 4px; border: 2px solid #111; background: #fff; color: #111; }
+.card { background: #fff; border: 2px solid #111; border-radius: 4px; padding: 16px; margin: 12px 0; }
+.big { font-size: 30px; font-weight: 900; letter-spacing: -0.5px; }
+.muted { color: #555; font-size: 15px; }
+.ok { color: #0a7d32; } .bad { color: #c41a1a; } .wait { color: #9a6200; }
+video { width: 100%; border: 2px solid #111; border-radius: 4px; background: #000; display: block; }
+[hidden] { display: none !important; }
+@media (prefers-color-scheme: dark) {
+  :root { color-scheme: dark; }
+  body { background: #000; color: #f5f5f5; }
+  button, .btn { background: #f5f5f5; color: #000; border-color: #f5f5f5; }
+  button.alt, .btn.alt { background: #000; color: #f5f5f5; }
+  input[type=text], .card { background: #111; color: #f5f5f5; border-color: #f5f5f5; }
+  video { border-color: #f5f5f5; }
+  .muted { color: #aaa; } .ok { color: #3ddc76; } .bad { color: #ff5c5c; } .wait { color: #ffc23d; }
+}
+
+@page { size: 4in 6in; margin: 0; }
+#sheet { display: none; }
+/* Label + sign: used off-screen for measuring and on paper. */
+/* Same fields and layout as the chute printer's own bag label; nothing on it says "reprint". No piece count:
+   it changes after merges, one more chance to be wrong. */
+.label { width: 4in; height: 6in; padding: 0.22in 0.25in 0.3in; display: flex; flex-direction: column; overflow: hidden;
+  font-family: "Arial Narrow", Arial, sans-serif; color: #000; background: #fff; position: relative; }
+.top { display: flex; gap: 0.18in; align-items: flex-start; }
+.qr svg { width: 1.25in; height: 1.25in; display: block; }
+.facts { font-size: 15pt; line-height: 1.35; padding-top: 0.02in; }
+.lbl { font-size: 10.5pt; font-weight: 700; margin-top: 0.04in; }
+.dest { font-size: 58pt; font-weight: 800; text-align: center; line-height: 1; margin: 0.3in 0 0.35in; white-space: nowrap; overflow: hidden; }
+.remark { font-size: 22pt; font-weight: 700; min-height: 0.4in; }
+.bar { text-align: center; margin-top: auto; }
+.bar svg { width: 3in; height: 0.75in; display: block; margin: 0 auto; }
+.no { font-size: 15pt; font-weight: 700; margin-top: 0.04in; }
+/* The sign is laid out sideways (6x4) and turned to fit the 4x6 label roll. */
+.label, .label *, .signpage, .signpage * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+.signpage { width: 4in; height: 6in; overflow: hidden; position: relative; }
+.sign { width: 6in; height: 4in; padding: 0.18in 0.22in; display: flex; flex-direction: column; overflow: hidden;
+  font-family: Arial, sans-serif; color: #000; position: absolute; top: 0; left: 0; transform-origin: top left;
+  transform: translateX(4in) rotate(90deg); }
+.sign .q { white-space: nowrap; overflow: hidden; background: #000; color: #fff; font-size: 20pt; font-weight: 900; text-align: center; padding: 0.06in; line-height: 1.1; }
+.sign .stop { font-size: 21pt; white-space: nowrap; overflow: hidden; font-weight: 900; text-align: center; line-height: 1.1; margin: 0.06in 0 0.08in; }
+.sign .cols { display: flex; gap: 0.2in; align-items: center; flex: 1; border-top: 0.03in solid #000; padding-top: 0.08in; }
+.sign .code svg { width: 2.1in; height: 2.1in; display: block; }
+.sign .inst { font-size: 13pt; font-weight: 900; letter-spacing: 1px; margin-bottom: 0.08in; }
+.sign ol { margin: 0; padding: 0; list-style: none; font-size: 13pt; font-weight: 700; line-height: 1.2; }
+.sign li { display: flex; gap: 0.08in; align-items: flex-start; margin-bottom: 0.08in; }
+.sign li b { flex: 0 0 0.3in; height: 0.3in; border-radius: 50%; border: 0.02in solid #000; background: #000; color: #fff; font-size: 14pt;
+  display: flex; align-items: center; justify-content: center; }
+
+.date { font-size: 13pt; font-weight: 700; }
+/* Chute sticker: a finished 4x6 picture, one page per copy. */
+.stk { width: 4in; height: 6in; overflow: hidden; }
+.stk + .stk { break-before: page; }
+.stk img { width: 4in; height: 6in; display: block; }
+@media print {
+  body { background: #fff; color: #000; }
+  main { display: none; }
+  #sheet { display: block; }
+}
+</style></head><body><main>
+<h1>Label printer</h1>
+<div class="card"><div class="big" id="state">Starting…</div><div class="muted" id="sub"></div></div>
+<div class="row"><button class="alt" id="test">Print a test label</button></div>
+<div class="row"><button class="alt" id="sign">Imprimir letrero · Print sign</button></div>
+<div class="row"><a class="btn alt" href="/p/demo-print-000000000/install.bat">Install background printer (Windows)</a></div>
+<div class="muted">With the background printer installed (or <code>agent/label_agent.py</code> running on the computer by the printer), nothing needs to stay open: labels print by themselves, even with this page closed.</div>
+<h1 style="margin-top:24px;font-size:18px">Printed</h1><div id="recent"></div>
+</main><div id="sheet"></div>
+<script src="https://cdn.jsdelivr.net/npm/zxing-wasm@3.1.6/dist/iife/writer/index.js"></script>
+<script>
+const BASE = "/p/demo-print-000000000";
+const SCAN_URL = "https://hub.example/s/demo-scan-0000000000";
+const HUB = "HOU.H";
+const VERSION = "1olm9x0";
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+function fit(svg, stretch) {
+  const w = /width="(\d+(?:\.\d+)?)"/.exec(svg), h = /height="(\d+(?:\.\d+)?)"/.exec(svg);
+  if (!w || !h) return svg;
+  return svg.replace("<svg", '<svg viewBox="0 0 ' + w[1] + " " + h[1] + '" preserveAspectRatio="' + (stretch ? "none" : "xMidYMid meet") + '"')
+    .replace(/ width="[^"]*"/, "").replace(/ height="[^"]*"/, "");
+}
+// "VCT01-004" -> destination "004", remark "VCT01-" (how the chute printer splits it); no dash -> all destination.
+function split(route) {
+  const i = String(route || "").lastIndexOf("-");
+  return i > 0 ? [route.slice(i + 1), route.slice(0, i + 1)] : [route || "", ""];
+}
+// "2026-11-18 11:09:13" -> "11:09:13 11/18/2026", like the chute label
+function wmsDate(d) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}:\d{2}:\d{2})/.exec(String(d || ""));
+  return m ? m[4] + " " + m[2] + "/" + m[3] + "/" + m[1] : String(d || "");
+}
+async function draw(x) {
+  const qr = await ZXingWASM.writeBarcode(x.bag, { format: "QRCode", scale: 4 });
+  const bar = await ZXingWASM.writeBarcode(x.bag, { format: "Code128", scale: 3 });
+  const [dest, remark] = split(x.route);
+  return '<div class="label"><div class="top"><div><div class="qr">' + fit(qr.svg) + '</div><div class="lbl">Destination:</div></div>' +
+    '<div class="facts"><div>Chute: ' + esc(x.chute) + "</div><div>Origin: " + esc(x.origin || HUB) + "</div></div></div>" +
+    '<div class="dest">' + esc(dest) + '</div><div class="lbl">Remark:</div><div class="remark">' + esc(remark) + "</div>" +
+    '<div class="bar">' + fit(bar.svg, true) + '<div class="no">' + esc(x.bag) + '</div><div class="date">Date: ' + esc(wmsDate(x.date)) + "</div></div></div>";
+}
+async function signHtml() {
+  const qr = await ZXingWASM.writeBarcode(SCAN_URL, { format: "QRCode", scale: 6, ecLevel: "M" });
+  return '<div class="signpage"><div class="sign"><div class="q">¿LA ETIQUETA NO SALIÓ BIEN?</div>' +
+    '<div class="stop">¡NO PRESIONES EL BOTÓN OTRA VEZ!</div><div class="cols"><div class="code">' + fit(qr.svg) + '</div>' +
+    '<div><div class="inst">EN LUGAR DE ESO:</div><ol>' +
+    '<li><b>1</b><span>Escanea este código QR con tu teléfono</span></li>' +
+    '<li><b>2</b><span>Con la cámara, escanea UN paquete de adentro de la caja</span></li>' +
+    '<li><b>3</b><span>Presiona IMPRIMIR</span></li>' +
+    '<li><b>4</b><span>Ven a la mesa de clasificación y recoge la etiqueta</span></li></ol></div></div></div></div>';
+}
+// Lay the sheet out off-screen, shrink any line that's wider than its box (Windows fonts run wider), then print.
+async function printSheet(markup) {
+  const sh = $("sheet");
+  sh.innerHTML = markup;
+  sh.style.cssText = "display:block;position:fixed;left:-20000px;top:0";
+  await new Promise((r) => setTimeout(r, 100));
+  await Promise.all([...sh.querySelectorAll("img")].map((i) => i.decode().catch(() => {})));
+  sh.querySelectorAll(".q, .stop, .dest").forEach((el) => {
+    let size = parseFloat(getComputedStyle(el).fontSize);
+    while (el.scrollWidth > el.clientWidth + 1 && size > 8) { size -= 1; el.style.fontSize = size + "px"; }
+  });
+  sh.style.cssText = "";
+  await new Promise((r) => setTimeout(r, 50));
+  window.print();
+  sh.innerHTML = "";
+}
+async function printOne(x) {
+  if (x.kind === "sticker") return printSheet(Array(x.copies || 1).fill('<div class="stk"><img src="' + x.img + '"></div>').join(""));
+  await printSheet(await draw(x)); // with --kiosk-printing print() returns after the job is sent, no dialog
+}
+let working = false, fails = 0, first = true;
+async function tick() {
+  if (working) return;
+  working = true;
+  try {
+    const d = await (await fetch(BASE + "/next?wait=" + (first ? 0 : 25), { cache: "no-store" })).json();
+    first = false;
+    if (d.agent) {
+      $("state").innerHTML = '<span class="ok">Background printer is on ✓</span>';
+      $("sub").textContent = "This page isn't needed. You can close it.";
+      working = false; setTimeout(tick, 20000); return;
+    }
+    if (d.version && d.version !== VERSION && !d.queue.length) { location.reload(); return; } // a newer page: load it
+    fails = 0;
+    for (const j of d.queue) {
+      $("state").textContent = "Printing " + j.label.route + "…";
+      await printOne(j.label);
+      await fetch(BASE + "/printed", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: j.id }) });
+    }
+    $("state").innerHTML = '<span class="ok">Ready ✓</span>';
+    $("sub").textContent = "Checked " + new Date().toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", second: "2-digit" });
+    const t = (ms) => new Date(ms).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+    $("recent").innerHTML = (d.recent || []).filter((r) => r.label).map((r) => '<div class="card"><b>' + esc(r.label.route) + "</b>" + (r.label.bag ? " · " + esc(r.label.bag) : "") +
+      (r.label.kind === "sticker" ? " ×" + esc(r.label.copies) : " · " + esc(r.label.pcs) + " pcs") + '<div class="muted">' + t(r.at) + "</div></div>").join("") || '<div class="muted">Nothing yet.</div>';
+  } catch (e) {
+    fails++;
+    $("state").innerHTML = '<span class="bad">No internet</span>'; $("sub").textContent = "Retrying…";
+    await new Promise((r) => setTimeout(r, 3000));
+  }
+  working = false;
+  setTimeout(tick, 200); // the next long poll
+}
+$("sign").onclick = async () => printSheet(await signHtml());
+$("test").onclick = () => printOne({ route: "TEST-000", bag: "TEST-LABEL-0001", chute: "0", date: "", origin: HUB, pcs: 0 });
+// Keep the computer awake while this page is showing.
+async function awake() { try { if (navigator.wakeLock && !document.hidden) await navigator.wakeLock.request("screen"); } catch (e) {} }
+// ?render=1: the ops host draws a label here and takes its picture (the agent prints pictures).
+if (new URLSearchParams(location.search).has("render")) {
+  window.renderLabel = async (x) => {
+    const sh = $("sheet");
+    sh.innerHTML = await draw(x);
+    sh.style.cssText = "display:block;position:fixed;left:0;top:0;background:#fff;z-index:9";
+    await new Promise((r) => setTimeout(r, 50));
+    sh.querySelectorAll(".dest").forEach((el) => {
+      let size = parseFloat(getComputedStyle(el).fontSize);
+      while (el.scrollWidth > el.clientWidth + 1 && size > 8) { size -= 1; el.style.fontSize = size + "px"; }
+    });
+    return true;
+  };
+  $("state").textContent = "Render mode";
+} else {
+  document.addEventListener("visibilitychange", awake);
+  awake();
+  tick();
+}
+</script></body></html>

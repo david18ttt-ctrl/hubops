@@ -1,0 +1,1 @@
+{"name":"hubops-webpush","private":true,"description":"Sends the phone app's Web Push notifications from the ops host (send.js, flush.js)","dependencies":{"web-push":"^3.6.7"}}

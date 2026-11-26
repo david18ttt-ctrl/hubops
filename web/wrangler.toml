@@ -1,0 +1,48 @@
+# The hub-ops worker (src/worker.js): phone app, truck page, unsorted board, PDA board, and the cron jobs.
+# Local:  npx --yes wrangler@4 dev -c web/wrangler.toml --local --var DEMO:true   (no account or login needed)
+# Deploy: create a KV namespace (npx wrangler kv namespace create PLAN), put its id below, set the secrets,
+#         then npx wrangler deploy -c web/wrangler.toml.
+#
+# Secrets (npx wrangler secret put <NAME> -c web/wrangler.toml; locally, put them in web/.dev.vars):
+#   APP_PUSH_KEY        X-Push-Key the ops host sends with its pushes (POST /app-data/*, /app-alert, /ops/command …)
+#   APP_VIEW_KEY        the phone app's path key: /a/<key>/ (16+ characters)
+#   APP_LINKS           JSON [{"name": "Trucks", "url": "/trucks/<key>"}, …], other pages shown as tabs in the app
+#   VAPID_PUBLIC        Web Push public key (the private key stays on the ops host, scripts/webpush/)
+#   TRUCKS_VIEW_KEY     dispatch's truck page: /trucks/<key>
+#   LIMIT_NEWS_KEY      the chat reader's path key: /limit-news/<key>
+#   UNSORTED_PUSH_KEY   X-Push-Key for /unsorted-data and /unsorted-lists
+#   UNSORTED_VIEW_KEY   the unsorted board: /u/<key>
+#   PDA_PUSH_KEY        x-pda-key for /pda-data, /pda-names, /pda-counts
+#   QUALITY_PUSH_KEY    x-pda-key for /pda-errors
+#   PDA_VIEW_KEY        the PDA board: /pda/<key>
+#   PDA_COMPANY_KEYS    JSON {"VA": "<key>", "VB": "<key>", "VC": "<key>"}: each vendor's own PDA board
+#   WMS_TOKEN           bearer token for the WMS (the truck-space check and the live PDA numbers)
+#   WMS_SCAN_HEADERS    JSON of extra headers the WMS scan history needs (optional)
+#   LABEL_SCAN_KEY      the label station's scan link: /s/<key> (16+ characters)
+#   LABEL_PRINT_KEY     the print agent's queue: /p/<key> (16+ characters)
+name = "hubops-app"
+main = "src/worker.js"
+compatibility_date = "2026-10-01"
+workers_dev = true
+preview_urls = false
+
+[vars]
+# The WMS the worker reads (hubsim/server.py serves a fake one locally on port 8765).
+WMS_URL = "http://127.0.0.1:8765"
+# "true" fills KV with synthetic data and serves an index at "/" (use with wrangler dev; see demo.js).
+DEMO = "false"
+
+[triggers]
+# Hourly: rebuild the truck forecasts. Every 5 minutes: the truck-space check (it runs every 15) and PDA counts.
+crons = ["0 * * * *", "*/5 * * * *"]
+
+[[kv_namespaces]]
+binding = "PLAN"
+id = "REPLACE_WITH_YOUR_KV_ID"
+
+# Label station (labelstation.js): scan requests + print queue. D1, not KV (KV's 1,000 writes a day). The tables are
+# created on first use. Deploy: npx wrangler d1 create hubops-labels, put its id below.
+[[d1_databases]]
+binding = "LABELS"
+database_name = "hubops-labels"
+database_id = "REPLACE_WITH_YOUR_D1_ID"

@@ -1,0 +1,13 @@
+{
+  "name": "hubops-web",
+  "private": true,
+  "type": "module",
+  "description": "Cloudflare Worker: phone app, truck-space forecast and boards for a parcel hub",
+  "scripts": {
+    "test": "node --test",
+    "dev": "npx --yes wrangler@4 dev -c wrangler.toml --local --var DEMO:true",
+    "seed": "node demo/write-seed.mjs",
+    "preview": "node demo/render-preview.mjs",
+    "embed-agent": "node demo/embed-agent.mjs"
+  }
+}

@@ -1,0 +1,1156 @@
+// The phone app: one page added to the phone's home screen (opens full-screen, no app store), with tabs for
+// the things to do now, the live stuck chutes, tonight's chute alerts, the feeder pace, a floor scanner, and the
+// other pages (unsorted board, truck page, PDA board) inside it. Mounted by worker.js.
+//
+// The ops host (the machine running the hubops/ jobs) pushes data with X-Push-Key = APP_PUSH_KEY:
+//   POST /app-data/chutes   chute_alerts.py, on change or every 10 minutes while the sorter is checked
+//   POST /app-data/feeder   feeder_pace.py, each hour
+// Phone notifications (Web Push): the page subscribes and saves its subscription here; the ops host reads them
+// (GET /app-subs) and sends the pushes itself with the VAPID private key, which never leaves the ops host.
+// Page: GET /a/<APP_VIEW_KEY> (+ /data, /manifest.webmanifest, /sw.js, /icon.png, POST /subscribe).
+// APP_LINKS (secret) = JSON [{"name": "Trucks", "url": "https://..." or "/trucks/<key>"}], the other pages shown as tabs.
+import { ICON_PNG } from "./app-icon.js";
+import { ALERTS_KEY, addAlert, markPushed, chatAdd, editAlert } from "./appalert.js";
+
+const CHUTES_KEY = "app_chutes";
+const FEEDER_KEY = "app_feeder";
+const DONOW_KEY = "app_donow"; // do_now.py: what someone has to physically do right now
+const DONE_KEY = "app_done"; // Done presses on that list: [{id, at}], newest last
+const FLOOR_KEY = "app_floor"; // floor_now.py: speed now, belt freight left, next trucks
+const SUBS_KEY = "app_subs";
+const SCANS_KEY = "app_scans"; // Floor scans from the Scan tab: [{id, sent, codes: [{code, at, kind}]}], newest last
+const FIXED_KEY = "app_fixed"; // "Fixed" presses on the Chutes tab: [{chute, start, at}], newest last
+const LABELS_KEY = "app_labels"; // the floor-scan job's answer: the labels to print and where each goes
+const IMG_PREFIX = "app_img:";
+const NO_STORE = { "cache-control": "no-store", "x-robots-tag": "noindex" };
+
+const json = (data, status = 200) =>
+  new Response(JSON.stringify(data), { status, headers: { ...NO_STORE, "content-type": "application/json" } });
+
+function pushAllowed(request, env) {
+  return !!env.APP_PUSH_KEY && request.headers.get("x-push-key") === env.APP_PUSH_KEY;
+}
+
+export function links(env) {
+  try {
+    const list = JSON.parse(env.APP_LINKS || "[]");
+    // https links, or paths on this same worker ("/trucks/<key>").
+    return list.filter((l) => l && typeof l.name === "string" && /^(https:[/][/]|[/][a-z])/.test(l.url || ""));
+  } catch (e) {
+    return [];
+  }
+}
+
+export default {
+  async fetch(request, env) {
+    const url = new URL(request.url);
+    const path = url.pathname;
+
+    const push = /^[/]app-data[/](chutes|feeder|labels|floor|donow)$/.exec(path);
+    if (push && request.method === "POST") {
+      if (!pushAllowed(request, env)) return new Response("Forbidden", { status: 403 });
+      const body = await request.json();
+      await env.PLAN.put({ chutes: CHUTES_KEY, feeder: FEEDER_KEY, labels: LABELS_KEY, floor: FLOOR_KEY, donow: DONOW_KEY }[push[1]], JSON.stringify(body));
+      return new Response("OK");
+    }
+    // Alerts (appalert.js): the ops host adds its own here; its flush.js reads the ones not pushed yet,
+    // sends the notifications, and marks them pushed.
+    if (path === "/app-alert" || path === "/app-alerts-pending" || path === "/app-alerts-pushed") {
+      if (!pushAllowed(request, env)) return new Response("Forbidden", { status: 403 });
+      if (path === "/app-alert" && request.method === "POST") {
+        await addAlert(env, await request.json());
+        return json({ ok: true });
+      }
+      const list = (await env.PLAN.get(ALERTS_KEY, "json")) || [];
+      if (path === "/app-alerts-pending" && request.method === "GET") {
+        return json(list.filter((a) => !a.pushed).map(({ id, title, text, link }) => ({ id, title, text, link })));
+      }
+      if (path === "/app-alerts-pushed" && request.method === "POST") {
+        const { ids = [] } = await request.json();
+        await env.PLAN.put(ALERTS_KEY, JSON.stringify(markPushed(list, ids)));
+        return json({ ok: true });
+      }
+      return new Response("Not found", { status: 404 });
+    }
+    // A picture for an alert (e.g. the headcount sheet with what to write in red). Kept 3 days. One KV write.
+    const img = /^[/]app-img[/]([a-z0-9-]{1,60})$/.exec(path);
+    if (img && request.method === "POST") {
+      if (!pushAllowed(request, env)) return new Response("Forbidden", { status: 403 });
+      const bytes = await request.arrayBuffer();
+      if (!bytes.byteLength || bytes.byteLength > 3000000) return new Response("Bad size", { status: 400 });
+      await env.PLAN.put(IMG_PREFIX + img[1], bytes, { expirationTtl: 3 * 86400 });
+      return json({ ok: true });
+    }
+    // The ops host's assistant runner: what's waiting for an answer, and the answers.
+    if (path === "/app-asks-pending" && request.method === "GET") {
+      if (!pushAllowed(request, env)) return new Response("Forbidden", { status: 403 });
+      const list = (await env.PLAN.get(ALERTS_KEY, "json")) || [];
+      return json(list.filter((a) => a.asking).map(({ id, at, title, text, reply, link, ref, chat, asking }) => ({ id, at, title, text, reply, link, ref, chat, asking })));
+    }
+    if (path === "/app-ask-answer" && request.method === "POST") {
+      if (!pushAllowed(request, env)) return new Response("Forbidden", { status: 403 });
+      const { id, text, answered, still, title, alertText } = await request.json();
+      const list = (await env.PLAN.get(ALERTS_KEY, "json")) || [];
+      if (title || alertText) editAlert(list, id, { title, text: alertText });
+      if (text && !chatAdd(list, id, "assistant", text, Date.now(), String(answered || ""), still === true)) return json({ error: "no such alert" }, 404);
+      await env.PLAN.put(ALERTS_KEY, JSON.stringify(list));
+      return json({ ok: true });
+    }
+    if (path === "/app-done" && request.method === "GET") { // The ops host (do_now.py) reads the Done presses
+      if (!pushAllowed(request, env)) return new Response("Forbidden", { status: 403 });
+      return json((await env.PLAN.get(DONE_KEY, "json")) || []);
+    }
+    if (path === "/app-fixed" && request.method === "GET") { // The ops host (chute_alerts.py) reads the Fixed presses
+      if (!pushAllowed(request, env)) return new Response("Forbidden", { status: 403 });
+      return json((await env.PLAN.get(FIXED_KEY, "json")) || []);
+    }
+    if (path === "/app-scans" && request.method === "GET") { // The ops host (the floor-scan job) reads the scan batches
+      if (!pushAllowed(request, env)) return new Response("Forbidden", { status: 403 });
+      return json((await env.PLAN.get(SCANS_KEY, "json")) || []);
+    }
+    if (path === "/app-subs" && (request.method === "GET" || request.method === "POST")) {
+      if (!pushAllowed(request, env)) return new Response("Forbidden", { status: 403 });
+      if (request.method === "POST") { // { remove: [endpoint, ...] }: subscriptions the push service says are gone
+        const { remove = [] } = await request.json();
+        const subs = ((await env.PLAN.get(SUBS_KEY, "json")) || []).filter((s) => !remove.includes(s.endpoint));
+        await env.PLAN.put(SUBS_KEY, JSON.stringify(subs));
+        return json({ left: subs.length });
+      }
+      return json((await env.PLAN.get(SUBS_KEY, "json")) || []);
+    }
+
+    const m = /^[/]a[/]([^/]+)([/].*)?$/.exec(path);
+    if (!m || !env.APP_VIEW_KEY || env.APP_VIEW_KEY.length < 16 || m[1] !== env.APP_VIEW_KEY) {
+      return new Response("Not found", { status: 404 });
+    }
+    const base = "/a/" + m[1];
+    const rest = m[2] || "/";
+
+    if (rest === "/subscribe" && request.method === "POST") {
+      const sub = await request.json();
+      if (!sub || typeof sub.endpoint !== "string" || !/^https:[/][/]/.test(sub.endpoint) || !sub.keys) {
+        return json({ error: "bad subscription" }, 400);
+      }
+      const subs = ((await env.PLAN.get(SUBS_KEY, "json")) || []).filter((s) => s.endpoint !== sub.endpoint);
+      subs.push({ endpoint: sub.endpoint, keys: sub.keys, added: new Date().toISOString() });
+      await env.PLAN.put(SUBS_KEY, JSON.stringify(subs.slice(-5)));
+      return json({ ok: true });
+    }
+    if (rest === "/ask" && request.method === "POST") { // A question about an alert, for the assistant runner (one KV write)
+      const body = await request.json().catch(() => ({}));
+      const text = String(body.text || "").trim();
+      if (!text) return json({ error: "empty" }, 400);
+      const list = (await env.PLAN.get(ALERTS_KEY, "json")) || [];
+      if (!chatAdd(list, String(body.id || ""), "you", text)) return json({ error: "no such alert" }, 404);
+      await env.PLAN.put(ALERTS_KEY, JSON.stringify(list));
+      return json({ ok: true });
+    }
+    if (rest === "/fixed" && request.method === "POST") { // One KV write per press
+      const body = await request.json().catch(() => ({}));
+      const chute = String(body.chute || "").slice(0, 10), start = String(body.start || "").slice(0, 30);
+      if (!chute || !start) return json({ error: "which chute?" }, 400);
+      const list = ((await env.PLAN.get(FIXED_KEY, "json")) || []).filter((f) => !(f.chute === chute && f.start === start));
+      list.push({ chute, start, at: new Date().toISOString() });
+      await env.PLAN.put(FIXED_KEY, JSON.stringify(list.slice(-40)));
+      return json({ ok: true });
+    }
+    if (rest === "/done" && request.method === "POST") { // One KV write per press
+      const body = await request.json().catch(() => ({}));
+      const id = String(body.id || "").slice(0, 120);
+      if (!id) return json({ error: "which task?" }, 400);
+      const list = ((await env.PLAN.get(DONE_KEY, "json")) || []).filter((d) => d.id !== id);
+      list.push({ id, at: new Date().toISOString() });
+      await env.PLAN.put(DONE_KEY, JSON.stringify(list.slice(-60)));
+      return json({ ok: true });
+    }
+    if (rest === "/scans" && request.method === "POST") {
+      // One storage write per Send. Sending the same batch again replaces it (same id), so nothing doubles.
+      const body = await request.json().catch(() => ({}));
+      const codes = (Array.isArray(body.codes) ? body.codes : []).filter((c) => c && typeof c.code === "string" && c.code)
+        .slice(0, 3000).map((c) => ({ code: c.code.slice(0, 80), at: String(c.at || "").slice(0, 30), kind: c.kind === "pkg" ? "pkg" : "bag" }));
+      if (!codes.length) return json({ error: "nothing scanned" }, 400);
+      const id = String(body.id || Date.now()).slice(0, 40);
+      const list = ((await env.PLAN.get(SCANS_KEY, "json")) || []).filter((b) => b.id !== id);
+      list.push({ id, sent: new Date().toISOString(), codes });
+      await env.PLAN.put(SCANS_KEY, JSON.stringify(list.slice(-20)));
+      return json({ ok: true, saved: codes.length });
+    }
+    if (request.method !== "GET") return new Response("Not found", { status: 404 });
+    if (rest === "/data") {
+      const [chutes, feeder, alerts, fixed, floor, donow, done] = await Promise.all([env.PLAN.get(CHUTES_KEY, "json"), env.PLAN.get(FEEDER_KEY, "json"),
+        env.PLAN.get(ALERTS_KEY, "json"), env.PLAN.get(FIXED_KEY, "json"), env.PLAN.get(FLOOR_KEY, "json"), env.PLAN.get(DONOW_KEY, "json"),
+        env.PLAN.get(DONE_KEY, "json")]);
+      return json({ chutes, feeder, floor, donow, done: done || [], fixed: fixed || [], alerts: (alerts || []).map(({ id, at, updated, title, text, reply, link, image, ref, chat, asking }) => ({ id, at, updated, title, text, reply, link, image, ref, chat, asking })) });
+    }
+    const shot = /^[/]img[/]([a-z0-9-]{1,60})$/.exec(rest);
+    if (shot) {
+      const bytes = await env.PLAN.get(IMG_PREFIX + shot[1], "arrayBuffer");
+      if (!bytes) return new Response("Gone", { status: 404 });
+      return new Response(bytes, { headers: { "content-type": "image/jpeg", "cache-control": "private, max-age=86400" } });
+    }
+    if (rest === "/labels") return json((await env.PLAN.get(LABELS_KEY, "json")) || null);
+    if (rest === "/print") {
+      return new Response(printPage((await env.PLAN.get(LABELS_KEY, "json")) || {}), { headers: { ...NO_STORE, "content-type": "text/html; charset=utf-8" } });
+    }
+    if (rest === "/manifest.webmanifest") {
+      return new Response(JSON.stringify(manifest(base)), { headers: { ...NO_STORE, "content-type": "application/manifest+json" } });
+    }
+    if (rest === "/sw.js") {
+      return new Response(serviceWorker(base), { headers: { ...NO_STORE, "content-type": "text/javascript", "service-worker-allowed": base + "/" } });
+    }
+    if (rest === "/icon.png") {
+      const bytes = Uint8Array.from(atob(ICON_PNG), (c) => c.charCodeAt(0));
+      return new Response(bytes, { headers: { "content-type": "image/png", "cache-control": "public, max-age=86400" } });
+    }
+    if (rest === "/" || rest === "") {
+      return new Response(appPage(base, links(env), env.VAPID_PUBLIC || ""), { headers: { ...NO_STORE, "content-type": "text/html; charset=utf-8" } });
+    }
+    return new Response("Not found", { status: 404 });
+  },
+};
+
+export function manifest(base) {
+  return { name: "HOU.H Sorter", short_name: "Sorter", start_url: base + "/", scope: base + "/", display: "standalone",
+    background_color: "#0b1622", theme_color: "#0b1622",
+    icons: [{ src: base + "/icon.png", sizes: "512x512", type: "image/png", purpose: "any" }] };
+}
+
+// Besides notifications, the service worker keeps a copy of the page and icon, so the app opens at once from the
+// home screen (the copy is refreshed in the background, so a new version shows from the next open).
+export function serviceWorker(base) {
+  return `self.addEventListener("install", () => self.skipWaiting());
+self.addEventListener("activate", (e) => e.waitUntil(self.clients.claim()));
+const KEEP = ["${base}/", "${base}/icon.png"];
+self.addEventListener("fetch", (e) => {
+  const u = new URL(e.request.url);
+  if (e.request.method !== "GET" || u.origin !== location.origin || !KEEP.includes(u.pathname)) return;
+  // The saved copy opens at once; when the server's page is different (a new version), the open page is told to
+  // reload itself, so a change shows on the first open instead of the second.
+  const net = fetch(e.request).then(async (r) => {
+    if (r.ok) {
+      const cache = await caches.open("app");
+      const old = u.pathname === "${base}/" ? await cache.match(u.pathname) : null;
+      const fresh = r.clone();
+      if (old && (await old.text()) !== (await fresh.clone().text())) {
+        (await self.clients.matchAll({ type: "window" })).forEach((c) => c.postMessage("new-version"));
+      }
+      await cache.put(u.pathname, fresh);
+    }
+    return r;
+  });
+  e.waitUntil(net.catch(() => {}));
+  e.respondWith(caches.match(u.pathname).then((hit) => hit || net));
+});
+self.addEventListener("push", (e) => {
+  let d = {};
+  try { d = e.data ? e.data.json() : {}; } catch (err) { d = { body: e.data ? e.data.text() : "" }; }
+  e.waitUntil(self.registration.showNotification(d.title || "Sorter", {
+    body: d.body || "", tag: d.tag || undefined, renotify: !!d.tag, icon: "${base}/icon.png", badge: "${base}/icon.png",
+    data: { url: "${base}/" } }));
+});
+self.addEventListener("notificationclick", (e) => {
+  e.notification.close();
+  const tab = e.notification.tag === "donow" ? "donow" : "alerts";
+  e.waitUntil(self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((list) => {
+    for (const c of list) { if ("focus" in c) { c.postMessage(tab); return c.focus(); } }
+    return self.clients.openWindow("${base}/#" + tab);
+  }));
+});
+`;
+}
+
+// The labels to print, one 4x6 page each, laid out like the WMS's own bag label:
+// route code on top, QR code + bag number + Date/Origin/Operator, a wide Code128 barcode at the bottom.
+// Barcodes are drawn on the phone/computer with zxing-wasm's writer, then the print dialog opens.
+export function printPage(labels) {
+  const items = (labels.items || []).filter((x) => x.print);
+  const data = JSON.stringify(items.map(({ bag, route, date, origin, operator, pcs }) => ({ bag, route, date, origin, operator, pcs })))
+    .replace(/</g, "\\u003c");
+  return `<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex"><title>Bag labels (${items.length})</title>
+<style>
+@page { size: 4in 6in; margin: 0; }
+* { box-sizing: border-box; }
+body { margin: 0; font-family: Roboto, Arial, sans-serif; color: #000; background: #fff; }
+.label { width: 4in; height: 6in; padding: 0.18in; display: flex; flex-direction: column; justify-content: space-between;
+  page-break-after: always; break-after: page; overflow: hidden; }
+.route { font-size: 40pt; font-weight: 800; word-break: break-all; line-height: 1.05; }
+.mid { display: flex; gap: 0.12in; align-items: flex-start; }
+.qr svg { width: 1.45in; height: 1.45in; display: block; }
+.info { flex: 1; font-size: 10.5pt; line-height: 1.5; }
+.info .no { font-size: 15pt; font-weight: 800; word-break: break-all; line-height: 1.15; margin-bottom: 4px; }
+.pcs { font-size: 13pt; font-weight: 700; }
+.bar svg { width: 100%; height: 1.35in; display: block; }
+.screen { padding: 16px; font: 15px -apple-system, Arial, sans-serif; }
+.screen button { font: inherit; font-weight: 700; padding: 12px 18px; border: 0; border-radius: 10px; background: #ff7a1a; color: #fff; }
+@media print { .screen { display: none; } }
+</style></head><body>
+<div class="screen"><b>${items.length} label${items.length === 1 ? "" : "s"}</b> · 4×6 in · <button onclick="print()">Print</button>
+<div id="st" style="color:#666;margin-top:8px">Drawing barcodes…</div></div>
+<div id="labels"></div>
+<script src="https://cdn.jsdelivr.net/npm/zxing-wasm@3.1.6/dist/iife/writer/index.js"></script>
+<script>
+const L = ${data};
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+// zxing's SVGs have a fixed size and no viewBox: give them one so they fill their box (the barcode may stretch).
+function fit(svg, stretch) {
+  const w = /width="(\\d+(?:\\.\\d+)?)"/.exec(svg), h = /height="(\\d+(?:\\.\\d+)?)"/.exec(svg);
+  if (!w || !h) return svg;
+  return svg.replace("<svg", '<svg viewBox="0 0 ' + w[1] + " " + h[1] + '" preserveAspectRatio="' + (stretch ? "none" : "xMidYMid meet") + '"')
+    .replace(/ width="[^"]*"/, "").replace(/ height="[^"]*"/, "");
+}
+(async () => {
+  const out = [];
+  for (const x of L) {
+    const qr = await ZXingWASM.writeBarcode(x.bag, { format: "QRCode", scale: 4 });
+    const bar = await ZXingWASM.writeBarcode(x.bag, { format: "Code128", scale: 3 });
+    out.push('<div class="label"><div class="route">' + esc(x.route || "") + '</div><div class="mid"><div class="qr">' + fit(qr.svg) +
+      '</div><div class="info"><div class="no">' + esc(x.bag) + "</div><div>Date: " + esc(x.date) + "</div><div>Origin: " + esc(x.origin) +
+      "</div><div>Operator: " + esc(x.operator) + '</div><div class="pcs">' + esc(x.pcs) + ' pcs</div></div></div><div class="bar">' + fit(bar.svg, true) + "</div></div>");
+  }
+  document.getElementById("labels").innerHTML = out.join("");
+  document.getElementById("st").textContent = L.length ? "Ready. Print at 100% (actual size) on 4×6 labels." : "No labels to print.";
+  if (L.length && !location.search.includes("noprint")) setTimeout(() => print(), 300); // ?noprint = just look
+})().catch((e) => { document.getElementById("st").textContent = "Couldn't draw the barcodes: " + e.message; });
+</script></body></html>`;
+}
+
+export function appPage(base, extra, vapid) {
+  const cfg = JSON.stringify({ base, links: extra, vapid }).replace(/</g, "\\u003c");
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Sorter">
+<meta name="theme-color" content="#0b1622">
+<link rel="manifest" href="${base}/manifest.webmanifest">
+<link rel="apple-touch-icon" href="${base}/icon.png">
+<title>Sorter</title>
+<style>
+:root { --bg: #0b1622; --card: #13212f; --line: #22344a; --text: #e8eef5; --muted: #8aa0b6; --red: #ff4d4f;
+        --red-bg: #3a1417; --amber: #faad14; --amber-bg: #3a2c0c; --green: #52c41a; --accent: #ff7a1a; --tab: 58px; }
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+  font: 15px/1.4 -apple-system, "Helvetica Neue", "PingFang SC", Arial, sans-serif; }
+.view { position: fixed; left: 0; right: 0; top: 0; bottom: calc(var(--tab) + env(safe-area-inset-bottom));
+  overflow-y: auto; -webkit-overflow-scrolling: touch; padding: calc(env(safe-area-inset-top) + 8px) 16px 24px; }
+.view[hidden] { display: none; }
+.frame { padding: env(safe-area-inset-top) 0 0; overflow: hidden; }
+.frame::before { content: "Loading…"; position: absolute; left: 0; right: 0; top: 40%; text-align: center; color: var(--muted); }
+.frame iframe { border: 0; width: 100%; height: 100%; display: block; background: #fff; position: relative; }
+.frame iframe:not(.ready) { visibility: hidden; }
+.frame[hidden] { display: block; visibility: hidden; } /* kept laid out, so switching to it is instant */
+button { touch-action: manipulation; }
+h1 { font-size: 26px; margin: 6px 0 2px; }
+h2 { font-size: 15px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .5px; margin: 22px 0 8px; }
+.sub { color: var(--muted); font-size: 13px; }
+.stale { color: var(--red); font-weight: 700; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; margin-top: 10px; }
+.chute { display: flex; align-items: center; gap: 12px; }
+.chute .who { flex: 1; min-width: 0; }
+.chute .route { font-size: 20px; font-weight: 800; }
+.chute small { display: block; color: var(--muted); font-size: 13px; }
+.chute .t { font-size: 26px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.card.red { border-color: var(--red); background: var(--red-bg); } .card.red .t { color: var(--red); }
+.card.amber { border-color: var(--amber); background: var(--amber-bg); } .card.amber .t { color: var(--amber); }
+.chute .state { display: block; text-align: right; color: var(--muted); font-size: 12px; }
+.card.quiet { border-color: var(--line); background: var(--card); opacity: .7; } .card.quiet .t { color: var(--muted); }
+.empty { color: var(--muted); }
+.nums { display: flex; justify-content: space-between; gap: 10px; margin-bottom: 6px; font-size: 15px; } .nums b { font-size: 22px; }
+.alert .ah { display: flex; justify-content: space-between; gap: 10px; margin-bottom: 6px; }
+.alert .reply { margin-top: 10px; padding: 10px; border-radius: 8px; background: #0e1b29; border: 1px solid var(--line); }
+.alert .reply small { color: var(--muted); display: block; margin-bottom: 4px; }
+button.big.chatlink { background: #3370ff; }
+.alert .ah small { color: var(--muted); white-space: nowrap; font-size: 13px; }
+.ok { color: var(--green); font-weight: 700; }
+.hn { display: flex; align-items: center; justify-content: space-between; margin-top: 12px; }
+.hn b { font-size: 18px; } .hn button { width: 52px; height: 40px; border: 1px solid var(--line); border-radius: 10px; background: var(--card); color: var(--text); font-size: 22px; }
+.hn button:disabled { opacity: .3; }
+.fz, .fr { display: grid; grid-template-columns: 34px 1fr 1fr; gap: 8px; align-items: center; }
+.fz { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .4px; margin-bottom: 4px; }
+.fr { padding: 5px 0; border-top: 1px solid var(--line); } .fr > b { font-size: 15px; text-align: center; } .fr > b.flag { color: var(--red); }
+.fb small { display: block; color: var(--muted); font-size: 11px; margin-top: 2px; white-space: nowrap; overflow: hidden; }
+.bar { position: relative; height: 10px; background: var(--line); border-radius: 5px; }
+.bar i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 5px; }
+.bar i.good { background: var(--green); } .bar i.warn { background: var(--amber); } .bar i.bad { background: var(--red); } .bar i.mu { background: var(--muted); }
+.bar u { position: absolute; top: -3px; bottom: -3px; width: 2px; margin-left: -1px; background: #fff; }
+.hist { display: flex; justify-content: space-between; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.hist:last-child { border-bottom: 0; }
+.hist b { font-size: 16px; } .hist small { color: var(--muted); display: block; font-size: 13px; }
+.hist .m { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.chat { margin-top: 12px; border-top: 1px solid var(--line); padding-top: 10px; }
+.bubble { padding: 8px 10px; border-radius: 10px; margin-bottom: 8px; }
+.bubble small { display: block; color: var(--muted); margin-bottom: 3px; }
+.bubble.me { background: #1d3557; margin-left: 24px; }
+.bubble.ai { background: #0e1b29; border: 1px solid var(--line); margin-right: 12px; }
+.bubble.wait { color: var(--muted); font-style: italic; }
+textarea.ask { width: 100%; box-sizing: border-box; border-radius: 10px; border: 1px solid var(--line); background: #0b1622; color: inherit;
+  font: 16px/1.4 -apple-system, sans-serif; padding: 10px; margin: 4px 0 8px; resize: vertical; }
+#viewer { position: fixed; inset: 0; z-index: 100; background: #000; overflow: auto; -webkit-overflow-scrolling: touch; }
+#viewer .pic img { display: block; width: 100vw; height: 100vh; object-fit: contain; }
+#viewer.zoom .pic img { width: 220vw; height: auto; object-fit: initial; }
+#viewer .x { position: fixed; top: calc(env(safe-area-inset-top) + 10px); right: 12px; z-index: 101; width: 44px; height: 44px;
+  border-radius: 22px; border: 0; background: rgba(40,40,40,.85); color: #fff; font-size: 22px; }
+img.shot { display: block; width: 100%; margin-top: 10px; border-radius: 8px; }
+pre.feed { white-space: pre-wrap; font: 14px/1.5 -apple-system, "PingFang SC", sans-serif; margin: 0; }
+button.big { width: 100%; border: 0; border-radius: 12px; padding: 14px; font: inherit; font-weight: 700;
+  background: var(--accent); color: #fff; margin-top: 10px; }
+.note { color: var(--muted); font-size: 13px; margin-top: 8px; }
+nav { position: fixed; left: 0; right: 0; bottom: 0; display: flex; background: #0e1b29; border-top: 1px solid var(--line);
+  padding-bottom: env(safe-area-inset-bottom); z-index: 5; }
+nav button { flex: 1; height: var(--tab); border: 0; background: none; color: var(--muted); font: inherit; font-size: 11px;
+  font-weight: 600; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; }
+nav button .i { font-size: 20px; line-height: 1; }
+nav button.on { color: var(--accent); }
+nav .dot { display: inline-block; min-width: 18px; padding: 0 5px; border-radius: 9px; background: var(--red); color: #fff;
+  font-size: 11px; position: relative; top: -2px; }
+nav .dot[hidden] { display: none; }
+.cam { position: relative; background: #000; border-radius: 12px; overflow: hidden; height: 46vh; margin-top: 8px; }
+.cam video { width: 100%; height: 100%; object-fit: cover; display: block; }
+.cam .msg { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--muted);
+  text-align: center; padding: 20px; pointer-events: none; }
+.cam .flash { position: absolute; inset: 0; border: 6px solid var(--green); opacity: 0; transition: opacity .35s; pointer-events: none; }
+.cam .flash.on { opacity: 1; transition: none; }
+.scanhead { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+.scanhead .n { font-size: 34px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.scanbtns { display: flex; gap: 10px; } .scanbtns button { flex: 1; }
+button.big.gray { background: #2a3b50; }
+button.fixbtn { margin-top: 8px; border: 0; border-radius: 10px; padding: 8px 12px; font: inherit; font-weight: 700; background: #1f7a4a; color: #fff; }
+.floor { padding: 10px 12px; }
+.task .do { font-size: 18px; font-weight: 700; line-height: 1.3; }
+.task .why { color: var(--muted); font-size: 13px; margin-top: 4px; }
+.task .foot { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-top: 8px; }
+.task .foot small { color: var(--muted); font-size: 12px; }
+.task.top { border-color: var(--accent); }
+.task .more { margin-top: 8px; } .task .more summary { color: var(--accent); font-weight: 700; font-size: 14px; padding: 4px 0; }
+.task .more pre { margin-top: 6px; padding: 10px; border-radius: 8px; background: #0e1b29; border: 1px solid var(--line); }
+.gone { color: var(--muted); font-size: 13px; padding: 6px 0; border-bottom: 1px solid var(--line); }
+.gone:last-child { border-bottom: 0; }
+.fl-h { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px; }
+.fl-h small, .fl-r small { color: var(--muted); }
+.fl-r { display: grid; grid-template-columns: 78px 1fr; gap: 8px; padding: 6px 0; border-top: 1px solid var(--line); font-size: 14px; }
+.fl-r > span { color: var(--muted); font-size: 12px; font-weight: 700; text-transform: uppercase; padding-top: 2px; }
+.fl-r small { display: block; font-size: 12px; margin-top: 2px; }
+.fl-r small.in { display: inline; }
+.fl-r b.good { color: var(--good, #5ec26a); } .fl-r b.warn { color: #f0b429; } .fl-r b.bad { color: #ff6b6b; }
+.seg { display: flex; background: #0e1b29; border: 1px solid var(--line); border-radius: 10px; padding: 3px; gap: 3px; margin: 4px 0 8px; }
+.seg button { flex: 1; border: 0; border-radius: 8px; padding: 9px 4px; background: none; color: var(--muted); font: inherit; font-size: 13px; font-weight: 700; }
+.seg button.on { background: var(--card); color: var(--text); }
+.lab .route { font-size: 22px; font-weight: 800; } .lab .bagno { font-variant-numeric: tabular-nums; }
+.lab .on { margin-top: 6px; padding: 8px 10px; border-radius: 8px; background: #0e1b29; border: 1px solid var(--line); }
+.lab .tag { display: inline-block; font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 8px; background: var(--green); color: #000; }
+.lab .tag.keep { background: #2a3b50; color: var(--text); } .lab .tag.wait { background: var(--amber); }
+.code { display: flex; justify-content: space-between; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--line);
+  font-variant-numeric: tabular-nums; } .code:last-child { border-bottom: 0; } .code small { color: var(--muted); }
+</style>
+</head>
+<body>
+<section class="view" id="v-donow"></section>
+<section class="view" id="v-chutes" hidden></section>
+<section class="view" id="v-alerts" hidden></section>
+<section class="view" id="v-feeder" hidden></section>
+<section class="view" id="v-labels" hidden></section>
+<section class="view" id="v-scan" hidden>
+  <div class="seg" id="sc-mode"><button data-m="bag">Floor labels</button><button data-m="pkg">Package in box</button><button data-m="labels">Labels</button></div>
+  <div id="sc-scan">
+  <div class="scanhead"><h1 id="sc-title">Scan labels</h1><div><span class="n" id="sc-n">0</span> <span class="sub">scanned</span></div></div>
+  <div class="sub" id="sc-last"></div>
+  <div class="cam"><video id="sc-video" playsinline muted></video><div class="flash" id="sc-flash"></div><div class="msg" id="sc-msg">Tap Start camera</div></div>
+  <div class="scanbtns"><button class="big" id="sc-start">Start camera</button><button class="big chatlink" id="sc-send">Send</button></div>
+  <div class="note" id="sc-note"></div>
+  <div class="card" id="sc-list"></div>
+  <button class="big gray" id="sc-new">New batch (clear list)</button>
+  </div>
+  <div id="sc-labels" hidden></div>
+</section>
+<div id="frames"></div>
+<nav id="nav"></nav>
+<script>
+const CFG = ${cfg};
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+// Date formatters are made once: making one is slow on a phone, and the alerts list needs hundreds.
+const CHI = { timeZone: "America/Chicago" };
+const PARTS = new Intl.DateTimeFormat("en-US", { ...CHI, hourCycle: "h23", year: "numeric", month: "2-digit", day: "2-digit",
+  hour: "2-digit", minute: "2-digit", second: "2-digit" });
+const HOUR = new Intl.DateTimeFormat("en-US", { ...CHI, hour: "numeric", hourCycle: "h23" });
+const TIME = new Intl.DateTimeFormat("en-US", { ...CHI, hour: "numeric", minute: "2-digit" });
+const WEEKDAY = new Intl.DateTimeFormat("en-US", { ...CHI, weekday: "short" });
+// Ops-host times are hub time ("YYYY-MM-DD HH:MM:SS", Central): turn them into real moments on any phone.
+function houston(text) {
+  if (!text) return 0;
+  const [d, t] = text.split(" "); const [y, mo, da] = d.split("-").map(Number); const [h, mi, s] = (t || "0:0:0").split(":").map(Number);
+  const guess = Date.UTC(y, mo - 1, da, h, mi, s || 0);
+  const p = Object.fromEntries(PARTS.formatToParts(new Date(guess)).map((x) => [x.type, x.value]));
+  return guess + (guess - Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour, +p.minute, +p.second));
+}
+const clock = (text) => { const ms = houston(text); return ms ? TIME.format(new Date(ms)) : ""; };
+const mmss = (ms) => { const s = Math.max(0, Math.floor(ms / 1000)); return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0"); };
+const ago = (text) => Math.round((Date.now() - houston(text)) / 60000);
+
+const TABS = [{ id: "donow", name: "Tasks", icon: "✓" }, { id: "chutes", name: "Chutes", icon: "⚠︎" }, { id: "alerts", name: "Alerts", icon: "✉︎" }, { id: "feeder", name: "Feeders", icon: "⇶" },
+  { id: "scan", name: "Scan", icon: "⌗" }]
+  .concat(CFG.links.map((l, i) => ({ id: "x" + i, name: l.name, icon: l.icon || "▦", url: l.url })))
+  .concat([{ id: "labels", name: "Labels", icon: "⊠" }]);
+let current = "donow";
+try { current = localStorage.getItem("app_tab2") || "donow"; } catch (e) {}
+if (location.hash === "#alerts") current = "alerts"; // Opened from a notification
+if (location.hash === "#donow") current = "donow";
+if ("serviceWorker" in navigator) navigator.serviceWorker.addEventListener("message", (e) => {
+  if (e.data === "alerts" || e.data === "donow") { show(e.data); load(); }
+  // A new version of the app: reload now, unless someone is typing (then on the next open).
+  if (e.data === "new-version" && !(document.activeElement && /TEXTAREA|INPUT/.test(document.activeElement.tagName))) location.reload();
+});
+if (!TABS.some((t) => t.id === current)) current = "donow";
+// The last data is kept on the phone, so the app shows it the moment it opens and then catches up.
+let DATA = { chutes: null, feeder: null, alerts: [] };
+let raw = ""; // the last /data answer as text: nothing is redrawn when it hasn't changed
+let fresh = false, offline = false; // fresh: this open has heard from the server
+try { raw = localStorage.getItem("app_data") || ""; if (raw) DATA = JSON.parse(raw); } catch (e) { raw = ""; }
+let seen = "";
+try { seen = localStorage.getItem("app_alerts_seen") || ""; } catch (e) {}
+
+// The tab bar is built once and then only updated, so a tap never lands on a button that's being replaced.
+function nav() {
+  const bar = document.getElementById("nav");
+  if (!bar.children.length) {
+    bar.innerHTML = TABS.map((t) => '<button data-tab="' + t.id + '"><span class="i">' + esc(t.icon) + ' <span class="dot" hidden></span></span>' +
+      esc(t.name) + "</button>").join("");
+    bar.addEventListener("click", (e) => { const b = e.target.closest("button"); if (b) show(b.dataset.tab); });
+  }
+  const live = (DATA.chutes && DATA.chutes.live || []).length;
+  const unseen = (DATA.alerts || []).filter((a) => (a.updated || a.at) > seen).length;
+  bar.querySelectorAll("button").forEach((b) => {
+    const id = b.dataset.tab;
+    const n = id === "donow" ? openTasks().length : id === "chutes" ? live : id === "labels" ? labelsOpen() : 0;
+    const dot = b.querySelector(".dot");
+    b.classList.toggle("on", id === current);
+    dot.hidden = !n;
+    dot.textContent = n || "";
+  });
+}
+function show(id) {
+  if (id === current && id.startsWith("x")) { const f = document.querySelector("#v-" + id + " iframe"); if (f) f.src = f.src; }
+  if (id !== "scan") scStop(); // the camera only runs while the Scan tab is open
+  current = id;
+  try { localStorage.setItem("app_tab2", id); } catch (e) {}
+  if (id === "alerts") markSeen();
+  TABS.forEach((t) => {
+    const el = t.url && t.id === id ? frame(t) : document.getElementById("v-" + t.id);
+    if (el) el.hidden = t.id !== id;
+  });
+  nav();
+}
+// The other pages (Unsorted, Dock, Trucks, PDA) each live in a frame, made the first time it's needed and kept,
+// so going back to a tab doesn't load it again.
+function frame(t) {
+  let el = document.getElementById("v-" + t.id);
+  if (el) return el;
+  el = document.createElement("section"); el.className = "view frame"; el.id = "v-" + t.id; el.hidden = t.id !== current;
+  el.innerHTML = '<iframe src="' + esc(t.url) + '" title="' + esc(t.name) + '"></iframe>';
+  el.firstChild.addEventListener("load", () => el.firstChild.classList.add("ready"));
+  document.getElementById("frames").appendChild(el);
+  return el;
+}
+// Shortly after opening, load the other pages one by one in the background, so tapping their tab is instant.
+function preload(i = 0) {
+  const t = TABS.filter((x) => x.url)[i];
+  if (!t) return;
+  frame(t);
+  setTimeout(() => preload(i + 1), 1500);
+}
+
+// Floor now (floor_now.py, every 10 min 4 PM-8 AM): speed, freight on the floor and the next trucks, at a glance.
+function floorCard() {
+  const F = DATA.floor;
+  if (!F) return "";
+  const n = (v) => (v == null ? "–" : Number(v).toLocaleString());
+  const sp = F.speed || {}, fr = F.freight || {}, tr = F.trucks || {};
+  let h = '<div class="card floor"><div class="fl-h"><b>Floor now</b><small>' + clock(F.updated) + (ago(F.updated) > 25 ? ' · <span class="stale">' + ago(F.updated) + " min old</span>" : "") + "</small></div>";
+  if (sp.per_hour != null) {
+    const r = sp.normal ? sp.per_hour / sp.normal : 1;
+    h += '<div class="fl-r"><span>Speed</span><div><b class="' + (r < 0.6 ? "bad" : r < 0.85 ? "warn" : "good") + '">' + n(sp.per_hour) + "/hr</b> · normal " + n(sp.normal) +
+      "<small>" + esc(sp.hour) + (sp.minutes < 60 ? " (first " + sp.minutes + " min)" : "") + " · Vendor A " + n(sp.vendor_a) + " · Vendor B " + n(sp.vendor_b) + (sp.rej != null ? " · rej " + sp.rej + "%" : "") + "</small></div></div>";
+  }
+  // An old count is never shown as live: the ops host sends an error instead.
+  if (fr.error) {
+    h += '<div class="fl-r"><span>On floor</span><div><b class="bad">no current count</b><small>' + esc(fr.error) + "</small></div></div>";
+  } else if (fr.in_full != null) {
+    const mins = sp.normal ? Math.round((60 * fr.in_full) / sp.normal) : null;
+    h += '<div class="fl-r"><span>On floor</span><div><b class="' + (mins != null && mins < 10 ? "bad" : "good") + '">' + n(fr.in_full) + " pkgs</b> in full gaylords" + (mins != null ? " ≈ " + mins + " min of belt" : "") +
+      "<small>" + (fr.trucks || []).map((t) => esc(t.from) + " " + n(t.in_full) + (t.codes && t.codes.length ? " (" + esc(t.codes.slice(0, 4).join(", ")) + ")" : "")).join(" · ") +
+      (fr.updated ? (fr.trucks && fr.trucks.length ? " · " : "") + "counted " + clock(fr.updated) : "") + "</small></div></div>";
+  }
+  // Trucks that arrived with gaylords nobody has scanned in: still on the trailer, or unloaded with no scan.
+  if ((fr.not_unloaded || []).length) {
+    h += '<div class="fl-r"><span>Not unloaded</span><div><b class="warn">' + n(fr.not_unloaded_pcs) + " pkgs</b> never scanned in<small>" +
+      fr.not_unloaded.map((t) => esc(t.from) + " " + n(t.pcs) + " · " + n(t.gaylords) + " gaylords · in " + clock(t.arrived)).join("<br>") + "</small></div></div>";
+  }
+  if (!fr.error && fr.tonight != null) {
+    h += '<div class="fl-r"><span>Left</span><div><b>' + n(fr.tonight) + "</b> from trucks in before midnight<small>" + n(fr.later) + " from trucks in after midnight</small></div></div>";
+  }
+  const list = tr.list || [];
+  h += '<div class="fl-r"><span>Next trucks</span><div>' + (list.length ? list.slice(0, 4).map((t) => {
+    const m = Math.round((houston(t.eta) - Date.now()) / 60000);
+    return "<b>" + clock(t.eta) + "</b> " + esc(t.route) + " " + n(t.pkgs) + ' <small class="in">' + (m > 0 ? "in " + (m >= 90 ? Math.floor(m / 60) + "h " + (m % 60) + "m" : m + " min") : "due now") + "</small>";
+  }).join("<br>") : "none listed") + "<small>" + (tr.posted ? "ETAs posted " + clock(tr.posted) : "") + (tr.error ? " · chat not read, showing last list" : "") + "</small></div></div>";
+  if (sp.night != null || tr.coming != null) h += '<div class="fl-r"><span>Tonight</span><div><b>' + n(sp.night) + "</b> sorted since 4 PM" +
+    (tr.coming ? "<small>" + n(tr.coming) + " more on trucks due before 6 AM</small>" : "") + "</div></div>";
+  return h + "</div>";
+}
+function chutesView() {
+  const c = DATA.chutes;
+  let h = "<h1>Stuck chutes</h1>";
+  h = floorCard() + h;
+  if (!c) { document.getElementById("v-chutes").innerHTML = h + '<div class="card empty">' + (fresh ? "No data yet. The ops host sends it every few minutes, 4 PM–8 AM." : offline ? "No connection." : "Loading…") + "</div>" + notifyBox(); bindNotify(); return; }
+  const age = ago(c.updated);
+  const hr = Number(HOUR.format(new Date()));
+  const active = hr >= 16 || hr < 8; // The ops host checks the sorter 4 PM to 8 AM
+  // Until this open has heard from the server, the page shows what it saved last time: say so instead of
+  // warning that the ops host stopped.
+  const wait = !fresh ? (offline ? ' · <span class="stale">no connection, showing saved</span>' : " · updating…") : "";
+  h += '<div class="sub">' + (active ? "Checked " + clock(c.updated) + " (" + age + " min ago)" : "Not checking now (alerts run 4 PM–8 AM)") + wait + "</div>";
+  if (fresh && active && age > 12) h += '<div class="card stale">Not updated for ' + age + " minutes. The ops host may be asleep or off the internet.</div>";
+  // A chute 15 quiet minutes is fixed: it leaves this list right away (rather than at the ops host's next
+  // send) and stays in tonight's alerts below.
+  const pressed = (f) => (DATA.fixed || []).some((p) => p.chute === String(f.chute) && p.start === f.start);
+  const live = (c.live || []).filter((x) => Date.now() - houston(x.last) < 900000 && !pressed(x));
+  if (!live.length) h += '<div class="card"><span class="ok">✓ No chute stuck</span></div>';
+  live.forEach((x) => {
+    // Timer = how long the chute has been rejecting (first to last reject), not time since it started:
+    // a chute someone already fixed stops counting. "Quiet" = no reject for 2+ minutes; fixed only after 15.
+    const started = houston(x.start), last = houston(x.last);
+    h += '<div class="card chute ' + (x.alerted ? "red" : "amber") + '" data-last="' + last + '"><div class="who"><div class="route">' + esc(x.where) + "</div><small>Chute " + esc(x.chute) +
+      " · " + x.rejects + " rejects · " + x.boxes + " boxes going around</small><small>Since " + clock(x.start) + ' · last reject <span class="ago"></span>' +
+      '</small></div><div><div class="t">' + mmss(last - started) + '</div><small class="state"></small>' +
+      '<button class="fixbtn" data-chute="' + esc(x.chute) + '" data-start="' + esc(x.start) + '">Fixed ✓</button></div></div>';
+  });
+  const hist = c.history || [];
+  h += "<h2>Tonight's alerts (" + hist.length + ")</h2>";
+  if (!hist.length) h += '<div class="card empty">None yet tonight.</div>';
+  else h += '<div class="card">' + hist.slice().reverse().map((x) => '<div class="hist"><div><b>' + esc(x.where) + "</b><small>Chute " + esc(x.chute) + " · " +
+    clock(x.start) + "–" + clock(x.last) + (x.cleared ? "" : " · still going") + '</small></div><div class="m"><b>' + x.minutes + " min</b><small>" + x.boxes + " boxes</small></div></div>").join("") + "</div>";
+  h += notifyBox();
+  document.getElementById("v-chutes").innerHTML = h;
+  // "Fixed": gone from this list at once; the ops host stops alerting that spell (a new jam is a new alert).
+  document.querySelectorAll("#v-chutes button.fixbtn").forEach((b) => b.addEventListener("click", async () => {
+    const mark = { chute: b.dataset.chute, start: b.dataset.start };
+    DATA.fixed = [...(DATA.fixed || []), mark];
+    chutesView();
+    try { await fetch(CFG.base + "/fixed", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(mark) }); } catch (e) {}
+  }));
+  bindNotify();
+  tick();
+}
+function markSeen() {
+  const newest = (DATA.alerts || []).reduce((m, a) => ((a.updated || a.at) > m ? a.updated || a.at : m), seen);
+  seen = newest;
+  try { localStorage.setItem("app_alerts_seen", seen); } catch (e) {}
+}
+function alertsView() {
+  const list = (DATA.alerts || []).slice().sort((a, b) => ((b.updated || b.at) > (a.updated || a.at) ? 1 : -1));
+  let h = '<h1>Alerts</h1><div class="sub">Everything the system noticed, last 3 days. Only chat messages that need you and things you have to send buzz; things to do are on Tasks.</div>';
+  if (!list.length) h += '<div class="card empty">' + (fresh ? "Nothing yet." : "Loading…") + "</div>";
+  list.forEach((a) => {
+    const t = a.updated || a.at;
+    h += '<div class="card alert"><div class="ah"><b>' + esc(a.title) + "</b><small>" + esc(dayClock(t)) + (a.updated && a.updated !== a.at ? " · updated" : "") +
+      '</small></div><pre class="feed">' + esc(a.text) + "</pre>" +
+      (a.image ? '<img class="shot" loading="lazy" data-full="' + esc(CFG.base + "/img/" + a.image) + '" src="' + esc(CFG.base + "/img/" + a.image) + '" alt="">' : "") +
+      (a.reply ? '<div class="reply"><small>Suggested reply</small><pre class="feed">' + esc(a.reply) + "</pre></div>" : "") +
+      (a.link ? '<button class="big chatlink" data-i="' + list.indexOf(a) + '">' + (a.reply ? "Copy reply &amp; open chat" : "Open in chat") + "</button>" : "") +
+      chatBox(a) + "</div>";
+  });
+  // Half-typed questions survive the redraw when new data comes in.
+  const drafts = {};
+  let focused = "";
+  document.querySelectorAll("#v-alerts textarea.ask").forEach((t) => { if (t.value) drafts[t.dataset.id] = t.value; if (t === document.activeElement) focused = t.dataset.id; });
+  document.getElementById("v-alerts").innerHTML = h;
+  document.querySelectorAll("#v-alerts textarea.ask").forEach((t) => {
+    if (drafts[t.dataset.id]) t.value = drafts[t.dataset.id];
+    if (focused === t.dataset.id) t.focus();
+  });
+  document.querySelectorAll("#v-alerts img.shot").forEach((im) => im.addEventListener("click", () => viewImage(im.dataset.full)));
+  document.querySelectorAll("#v-alerts button.send").forEach((b) => b.addEventListener("click", async () => {
+    const t = document.querySelector('#v-alerts textarea.ask[data-id="' + b.dataset.id + '"]');
+    const text = (t.value || "").trim();
+    if (!text) return;
+    b.disabled = true; b.textContent = "Sending…";
+    try {
+      const res = await fetch(CFG.base + "/ask", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: b.dataset.id, text }) });
+      if (!res.ok) throw new Error(res.status);
+      t.value = "";
+      load();
+    } catch (e) { b.disabled = false; b.textContent = "Not sent, tap to retry"; }
+  }));
+  // One tap: the suggested reply goes on the clipboard, then the conversation opens in the team chat; paste, edit, send.
+  document.querySelectorAll("button.chatlink[data-i]").forEach((b) => b.addEventListener("click", async () => {
+    const a = list[Number(b.dataset.i)];
+    if (a.reply) { try { await navigator.clipboard.writeText(a.reply); b.textContent = "Copied, opening chat…"; } catch (e) {} }
+    location.href = a.link;
+  }));
+}
+// Full-screen picture viewer (a plain link opened the file stuck at the top of the home-screen app, sideways).
+// A wide picture (the headcount sheet) is turned to fill the phone's height; tap to zoom in and scroll, tap
+// again to fit; the X closes it.
+function viewImage(url) {
+  const box = document.createElement("div");
+  box.id = "viewer";
+  box.innerHTML = '<button class="x" aria-label="Close">✕</button><div class="pic"><img alt=""></div>';
+  document.body.appendChild(box);
+  const img = box.querySelector("img");
+  box.querySelector(".x").addEventListener("click", () => box.remove());
+  let turned = false;
+  img.addEventListener("click", () => {
+    box.classList.toggle("zoom");
+    // A turned sheet's top-left (date, first rows) is at the top right of the screen: start there.
+    if (box.classList.contains("zoom")) { box.scrollTop = 0; box.scrollLeft = turned ? box.scrollWidth : 0; }
+  });
+  const src = new Image();
+  src.onload = () => {
+    if (src.naturalWidth > src.naturalHeight && innerHeight > innerWidth) {
+      const c = document.createElement("canvas");
+      c.width = src.naturalHeight; c.height = src.naturalWidth;
+      const g = c.getContext("2d");
+      g.translate(c.width, 0); g.rotate(Math.PI / 2); g.drawImage(src, 0, 0);
+      img.src = c.toDataURL("image/jpeg", 0.9);
+      turned = true;
+    } else img.src = url;
+  };
+  src.src = url;
+}
+// The conversation with the assistant under an alert: it looks into chat alerts on its own, and can be asked anything.
+function chatBox(a) {
+  const chat = a.chat || [];
+  let h = '<div class="chat">';
+  chat.forEach((c) => { h += '<div class="bubble ' + (c.from === "you" ? "me" : "ai") + '"><small>' + (c.from === "you" ? "You" : "Assistant") + " · " + esc(dayClock(c.at)) +
+    '</small><pre class="feed">' + esc(c.text) + "</pre></div>"; });
+  if (a.asking) h += '<div class="bubble ai wait"><small>Assistant</small>' + (a.asking === "research" ? "Looking into this…" : "Working on it…") + "</div>";
+  h += '<textarea class="ask" rows="2" data-id="' + esc(a.id) + '" placeholder="' + (chat.length ? "Reply…" : "Ask about this…") + '"></textarea>' +
+    '<button class="big gray send" data-id="' + esc(a.id) + '">Send</button></div>';
+  return h;
+}
+const dayClock = (text) => { const ms = houston(text); if (!ms) return "";
+  const d = new Date(ms); return WEEKDAY.format(d) + " " + TIME.format(d); };
+// Labels tab: every bag the hourly one-bag-one-label check flagged today (label_errors.py on the ops host,
+// sent with the chute data). A bag leaves once it's merged away, fills to 100+, or ships.
+const labelsOpen = () => (DATA.chutes && DATA.chutes.labels && DATA.chutes.labels.open) || 0;
+function errorsView() {
+  const L = DATA.chutes && DATA.chutes.labels;
+  let h = "<h1>Label errors</h1>";
+  if (!L) { document.getElementById("v-labels").innerHTML = h + '<div class="card empty">' + (fresh ? "No list yet. It comes from the hourly one-bag-one-label alerts." : "Loading…") + "</div>"; return; }
+  h += '<div class="sub">From the hourly one-bag-one-label alerts' + (L.last_card ? " · newest " + esc(L.last_card) : "") +
+    (DATA.chutes.updated ? " · checked " + clock(DATA.chutes.updated) : "") + "</div>";
+  const fixed = L.merged + L.filled;
+  h += '<div class="card"><div class="nums"><span><b>' + L.open + "</b> still open</span><span><b>" + fixed + "</b> fixed</span><span><b>" + L.left +
+    "</b> shipped as is</span></div><small>" + L.flagged + " flagged today" + (L.shift ? " · company count this shift: " + L.shift[0] + " of " + L.shift[1] + " bags" : "") +
+    " · fixed = merged into another bag or filled to 100+</small></div>";
+  if (!L.open) h += '<div class="card"><span class="ok">✓ Nothing open</span></div>';
+  (L.chutes || []).forEach((c) => {
+    h += '<div class="card alert"><div class="ah"><b>Chute ' + esc(c.chute) + (c.where ? " · " + esc(c.where) : "") + "</b><small>" + c.bags.length + " bag" + (c.bags.length > 1 ? "s" : "") + "</small></div>";
+    c.bags.forEach((b) => {
+      h += '<div class="code"><span>' + esc(b.bag) + "<br><small>" + esc(b.start) + " → " + (b.end ? esc(b.end) : "not finished") + " · flagged " + esc(b.hour) +
+        "</small></span><span><b>" + b.pcs + "</b> pcs" + (b.pcs !== b.then ? "<br><small>was " + b.then + "</small>" : "") + "</span></div>";
+    });
+    h += "</div>";
+  });
+  document.getElementById("v-labels").innerHTML = h;
+}
+let feedIdx = 0, feedMode = "hour"; // which hour the Feeders tab shows (0 = newest), or "night" = tonight so far
+try { feedMode = localStorage.getItem("feed_mode") || "hour"; } catch (e) {}
+if (feedMode !== "hour" && feedMode !== "night") feedMode = "hour";
+// Vendor filter. Feed stations: Vendor A staffs 1-8 + 16-22, Vendor B 9-15 + 23-30.
+let feedCo = "all";
+try { feedCo = localStorage.getItem("feed_co") || "all"; } catch (e) {}
+const coOf = (s) => { const n = parseInt(String(s), 10); return !n ? "" : (n <= 8 || (n >= 16 && n <= 22)) ? "va" : n <= 30 ? "vb" : ""; };
+const coPick = (list) => feedCo === "all" ? list : (list || []).filter((x) => coOf(x.s) === feedCo);
+const CO_NAME = { va: "Vendor A", vb: "Vendor B" };
+function coSum(list) { // this company's own total next to its normal, for the filtered header line
+  const fed = list.reduce((a, x) => a + (x.fed || 0), 0), nor = list.reduce((a, x) => a + (x.normal || 0), 0);
+  return CO_NAME[feedCo] + " " + fed.toLocaleString() + " fed" + (nor ? " (normal " + nor.toLocaleString() + ")" : "");
+}
+function feedRows(stations, quiet) {
+  // One line per feed station: speed bar (boxes fed, line = that booth's normal at this volume) and reject bar
+  // (its reject %, line = that booth's normal reject %).
+  const top = Math.max(1, ...stations.map((x) => Math.max(x.fed, x.normal || 0)));
+  const rtop = Math.max(6, ...stations.map((x) => Math.max(x.rej || 0, x.rej_normal || 0)));
+  const pc = (v, m) => Math.min(100, (100 * v) / m).toFixed(1) + "%";
+  let h = '<div class="fz"><span></span><span>Speed (boxes / hr)</span><span>Rejects</span></div>';
+  stations.forEach((x) => {
+    // Quiet hour (sorter under half its normal: start, break, end) or a booth that normally feeds little: speed isn't judged.
+    const sp = quiet || !x.normal || x.normal < 150 ? "mu" : x.slow || x.fed < 0.6 * x.normal ? "bad" : x.fed < 0.8 * x.normal ? "warn" : "good";
+    const rn = x.rej_normal == null ? 2.7 : x.rej_normal;
+    const rj = x.rej == null ? "mu" : x.high || (x.rej >= 4 && x.rej >= 1.6 * rn) ? "bad" : x.rej > rn + 1.5 ? "warn" : "good";
+    h += '<div class="fr"><b class="' + (x.slow || x.high ? "flag" : "") + '">' + esc(x.s) + "</b>" +
+      '<div class="fb"><div class="bar"><i class="' + sp + '" style="width:' + pc(x.fed, top) + '"></i>' +
+      (x.normal ? '<u style="left:' + pc(x.normal, top) + '"></u>' : "") + "</div><small>" + x.fed.toLocaleString() +
+      (x.normal ? " / " + x.normal.toLocaleString() : "") + "</small></div>" +
+      '<div class="fb"><div class="bar"><i class="' + rj + '" style="width:' + (x.rej == null ? "0" : pc(x.rej, rtop)) + '"></i>' +
+      (x.rej_normal != null ? '<u style="left:' + pc(x.rej_normal, rtop) + '"></u>' : "") + "</div><small>" +
+      (x.rej == null ? "–" : x.rej.toFixed(1) + "%") + (x.rej_normal != null ? " / " + x.rej_normal.toFixed(1) + "%" : "") +
+      (x.every_night ? " ·every night" : "") + "</small></div></div>";
+  });
+  return h + '<div class="note">Bar = this hour · white line = that booth’s normal (speed at tonight’s volume) · red = slow / high rejects</div>';
+}
+function feederView() {
+  const f = DATA.feeder;
+  const segs = [["hour", "By hour"], ["night", "Tonight so far"]];
+  let h = "<h1>Feed stations</h1>" + '<div class="seg">' + segs.map(([k, t]) => '<button data-fm="' + k + '" class="' + (feedMode === k ? "on" : "") + '">' + t + "</button>").join("") + "</div>";
+  h += '<div class="seg">' + [["all", "All"], ["va", "Vendor A"], ["vb", "Vendor B"]].map(([k, t]) => '<button data-co="' + k + '" class="' + (feedCo === k ? "on" : "") + '">' + t + "</button>").join("") + "</div>";
+  const v0 = document.getElementById("v-feeder");
+  const bindSeg = () => {
+    v0.querySelectorAll("button[data-fm]").forEach((b) => b.addEventListener("click", () => { feedMode = b.dataset.fm; try { localStorage.setItem("feed_mode", feedMode); } catch (e) {} feederView(); }));
+    v0.querySelectorAll("button[data-co]").forEach((b) => b.addEventListener("click", () => { feedCo = b.dataset.co; try { localStorage.setItem("feed_co", feedCo); } catch (e) {} feederView(); }));
+  };
+  if (!f) { document.getElementById("v-feeder").innerHTML = h + '<div class="card empty">' + (fresh ? "No hourly check yet tonight. It runs a few minutes after each hour, 6 PM–6 AM." : "Loading…") + "</div>"; bindSeg(); return; }
+  const hours = [f].concat(f.earlier || []);
+  feedIdx = Math.min(feedIdx, hours.length - 1);
+  if (feedMode === "night") {
+    const n = f.night;
+    if (!n) h += '<div class="card empty">No busy hours yet tonight.</div>';
+    else h += '<div class="sub">Average per busy hour · ' + n.hours + " hours · " + n.per_hour.toLocaleString() + "/hr (normal " +
+      n.normal.toLocaleString() + ") · rejects " + (n.rej == null ? "–" : n.rej + "%") + (feedCo !== "all" ? " · " + coSum(coPick(n.stations)) + "/hr" : "") +
+      '</div><div class="card">' + feedRows(coPick(n.stations)) + "</div>";
+  } else {
+    const e = hours[feedIdx];
+    h += '<div class="hn"><button data-fi="' + (feedIdx + 1) + '"' + (feedIdx >= hours.length - 1 ? " disabled" : "") + ">‹</button><b>" + esc(e.hour) +
+      "</b><button data-fi='" + (feedIdx - 1) + "'" + (feedIdx === 0 ? " disabled" : "") + ">›</button></div>";
+    h += '<div class="sub">' + (e.fed ? e.fed.toLocaleString() + " fed (normal " + (e.normal || 0).toLocaleString() + ") · rejects " + (e.rej == null ? "–" : e.rej + "%") + " · " : "") +
+      "checked " + clock(e.updated) + (feedIdx === 0 ? " · newest" : "") + "</div>";
+    const mine = coPick(e.stations);
+    if (feedCo === "all") h += '<div class="card">' + (e.text ? '<pre class="feed">' + esc(e.text) + "</pre>" : '<span class="ok">✓ Every station normal</span>') + "</div>";
+    else { // only this company's flagged stations
+      const sl = mine.filter((x) => x.slow), hi = mine.filter((x) => x.high);
+      const t = [mine.length ? coSum(mine) : ""].concat(sl.length ? ["Slow: " + sl.map((x) => x.s + ": " + x.fed.toLocaleString() + (x.normal ? " (normal " + x.normal.toLocaleString() + ")" : "")).join(" · ")] : [],
+        hi.length ? ["Rejects: " + hi.map((x) => x.s + ": " + (x.rej == null ? "–" : x.rej.toFixed(1) + "%")).join(" · ")] : []).filter(Boolean);
+      h += '<div class="card">' + (sl.length || hi.length ? '<pre class="feed">' + esc(t.join("\\n")) + "</pre>" : '<span class="ok">✓ Every ' + CO_NAME[feedCo] + " station normal</span>" + (t[0] ? '<div class="note">' + esc(t[0]) + "</div>" : "")) + "</div>";
+    }
+    const quiet = e.fed != null && e.normal && e.fed < 0.5 * e.normal;
+    if (mine && mine.length) h += '<div class="card">' + (quiet ? '<div class="note">Quiet hour (start, break or end): speed shown in grey, not judged</div>' : "") + feedRows(mine, quiet) + "</div>";
+  }
+  const v = document.getElementById("v-feeder");
+  v.innerHTML = h;
+  v.querySelectorAll("button[data-fi]").forEach((b) => b.addEventListener("click", () => { feedIdx = Number(b.dataset.fi); feederView(); }));
+  bindSeg();
+}
+function tick() {
+  let gone = false;
+  document.querySelectorAll(".card[data-last]").forEach((el) => {
+    const since = Date.now() - Number(el.dataset.last);
+    if (since >= 900000) { gone = true; return; } // fixed: drawn again without it
+    el.querySelector(".ago").textContent = mmss(since) + " ago";
+    // A full chute that half works goes quiet for a few minutes and comes back, so it's only
+    // called fixed after 15 quiet minutes (chute_alerts.SAME_PROBLEM); the ops host then drops it from this list.
+    const quiet = since >= 120000;
+    el.classList.toggle("quiet", quiet);
+    el.querySelector(".state").textContent = !quiet ? "still rejecting" : since >= 900000 ? "fixed" :
+      "quiet, NOT fixed yet (" + Math.ceil((900000 - since) / 60000) + " min to go)";
+  });
+  if (gone) chutesView();
+}
+
+// Notifications: on iPhone they only work after "Add to Home Screen" (opened from the icon).
+const standalone = () => window.navigator.standalone === true || matchMedia("(display-mode: standalone)").matches;
+let notifyState = "";
+function notifyBox() {
+  if (!("serviceWorker" in navigator)) return "";
+  if (!standalone()) return '<h2>Notifications</h2><div class="card">To get alerts on this phone: tap Share <b>⎙</b> → <b>Add to Home Screen</b>, then open <b>Sorter</b> from the home screen and turn them on there.</div>';
+  if (!("PushManager" in window) || !CFG.vapid) return '<h2>Notifications</h2><div class="card empty">This phone can\\'t get notifications here (needs iOS 16.4 or newer).</div>';
+  if (notifyState === "on") return '<h2>Notifications</h2><div class="card"><span class="ok">✓ On</span> · new Do now tasks and chat messages that need you come to this phone.<button class="big" id="test-n">Send a test</button><div class="note" id="n-note"></div></div>';
+  return '<h2>Notifications</h2><div class="card">Get a notification on this phone when there is something new to do.<button class="big" id="turn-on">Turn on notifications</button><div class="note" id="n-note">' + esc(notifyState) + "</div></div>";
+}
+function b64url(s) {
+  const pad = "=".repeat((4 - (s.length % 4)) % 4);
+  const raw = atob((s + pad).replace(/-/g, "+").replace(/_/g, "/"));
+  return Uint8Array.from(raw, (c) => c.charCodeAt(0));
+}
+async function subscribe() {
+  const reg = await navigator.serviceWorker.register(CFG.base + "/sw.js", { scope: CFG.base + "/" });
+  await navigator.serviceWorker.ready;
+  const perm = await Notification.requestPermission();
+  if (perm !== "granted") throw new Error("Notifications are blocked. Settings → Notifications → Sorter → Allow.");
+  const sub = (await reg.pushManager.getSubscription()) || await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64url(CFG.vapid) });
+  const res = await fetch(CFG.base + "/subscribe", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(sub) });
+  if (!res.ok) throw new Error("Couldn't save it (" + res.status + "). Try again.");
+  try { localStorage.setItem("app_sub_saved", sub.endpoint + "|" + new Date().toDateString()); } catch (e) {}
+}
+function bindNotify() {
+  const on = document.getElementById("turn-on");
+  if (on) on.addEventListener("click", async () => {
+    on.disabled = true; on.textContent = "Turning on…";
+    try { await subscribe(); notifyState = "on"; } catch (e) { notifyState = e.message || String(e); }
+    chutesView();
+  });
+  const t = document.getElementById("test-n");
+  if (t) t.addEventListener("click", async () => {
+    const reg = await navigator.serviceWorker.ready;
+    await reg.showNotification("Sorter", { body: "Test: this is how a stuck chute alert looks.", icon: CFG.base + "/icon.png" });
+    document.getElementById("n-note").textContent = "Shown on this phone. Alerts from the ops host come the same way.";
+  });
+}
+async function checkNotify() {
+  if (!("serviceWorker" in navigator)) return;
+  try {
+    const reg = await navigator.serviceWorker.register(CFG.base + "/sw.js", { scope: CFG.base + "/" });
+    if (!standalone() || !("PushManager" in window)) return;
+    const sub = await reg.pushManager.getSubscription();
+    if (sub && Notification.permission === "granted") {
+      notifyState = "on";
+      chutesView();
+      // Saved again once a day in case the server lost it (not on every open: each save is a storage write).
+      const mark = sub.endpoint + "|" + new Date().toDateString();
+      let last = "";
+      try { last = localStorage.getItem("app_sub_saved") || ""; } catch (e) {}
+      if (last !== mark) {
+        fetch(CFG.base + "/subscribe", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(sub) })
+          .then((r) => { if (r.ok) try { localStorage.setItem("app_sub_saved", mark); } catch (e) {} }).catch(() => {});
+      }
+    }
+  } catch (e) {}
+}
+
+// Do now (do_now.py on the ops host): the things someone has to physically do, most important first. A task goes away by
+// itself once the data shows it's handled (chute quiet, truck full); Done hides it now (one storage write) and,
+// for a stuck chute, also counts as that chute's Fixed press.
+let doneLocal = [];
+try { doneLocal = JSON.parse(localStorage.getItem("app_done") || "[]"); } catch (e) {}
+function openTasks() {
+  const D = DATA.donow;
+  if (!D) return [];
+  const done = new Set([...(DATA.done || []).map((d) => d.id), ...doneLocal]);
+  return (D.tasks || []).filter((t) => !done.has(t.id));
+}
+const SRC = { quest: "Quest", chute: "Stuck chute", dock: "Dock", coach: "Floor coach", label: "Lost label", big: "850+ bag", norule: "No chute rule" };
+// The Alerts tab is a quiet log (only chat messages that need attention and things to send buzz): no red count.
+function doNowView() {
+  const D = DATA.donow;
+  let h = "<h1>Do now</h1>";
+  if (!D) {
+    document.getElementById("v-donow").innerHTML = h + '<div class="card empty">' + (fresh ? "Nothing from the ops host yet." : offline ? "No connection." : "Loading…") + "</div>";
+    return;
+  }
+  const list = openTasks();
+  const hr = Number(HOUR.format(new Date()));
+  const c = DATA.chutes;
+  const hostAge = c ? ago(c.updated) : null;
+  const wait = !fresh ? (offline ? ' · <span class="stale">no connection, showing saved</span>' : " · updating…") : "";
+  h += '<div class="sub">' + (list.length ? list.length + " to do · " : "") + "changed " + clock(D.updated) + wait + "</div>";
+  if (fresh && (hr >= 16 || hr < 8) && hostAge != null && hostAge > 12) {
+    h += '<div class="card stale">The ops host has not checked in for ' + hostAge + " min: this list may be out of date.</div>";
+  }
+  if (!list.length) {
+    h += '<div class="card"><span class="ok">✓ Nothing for you to do right now</span><div class="note">Watching chutes, docks, labels and the floor. Your phone buzzes when something needs your hands.</div></div>';
+  }
+  list.forEach((t, i) => {
+    h += '<div class="card task' + (i === 0 ? " top" : "") + '"><div class="do">' + esc(t.do) + "</div>" +
+      (t.why ? '<div class="why">' + esc(t.why) + "</div>" : "") +
+      (t.extra && t.extra.more ? '<details class="more" data-id="' + esc(t.id) + '"><summary>More info</summary><pre class="feed">' + esc(t.extra.more) + "</pre></details>" : "") +
+      '<div class="foot"><small>' + esc(SRC[t.source] || t.source) + " · added " + clock(t.since) +
+      (t.updated && t.updated !== t.since ? " · updated " + clock(t.updated) : "") + "</small>" +
+      '<button class="fixbtn" data-id="' + esc(t.id) + '">Done ✓</button></div></div>';
+  });
+  const gone = D.cleared || [];
+  if (gone.length) {
+    h += '<h2>Handled lately</h2><div class="card">' + gone.map((g) => '<div class="gone">' + (g.how === "done" ? "✓ Done · " : g.how === "expired" ? "⌛ Timed out · " : "✓ Fixed on the floor · ") +
+      clock(g.gone) + " · " + esc(g.do) + "</div>").join("") + "</div>";
+  }
+  // An open "More info" stays open when the list is redrawn (every few seconds).
+  const opened = new Set([...document.querySelectorAll("#v-donow details.more[open]")].map((d) => d.dataset.id));
+  document.getElementById("v-donow").innerHTML = h;
+  document.querySelectorAll("#v-donow details.more").forEach((d) => { if (opened.has(d.dataset.id)) d.open = true; });
+  document.querySelectorAll("#v-donow button.fixbtn").forEach((b) => b.addEventListener("click", async () => {
+    const t = (D.tasks || []).find((x) => x.id === b.dataset.id);
+    doneLocal = [...doneLocal.filter((x) => x !== b.dataset.id), b.dataset.id].slice(-100);
+    try { localStorage.setItem("app_done", JSON.stringify(doneLocal)); } catch (e) {}
+    const fx = t && t.extra && t.extra.fixed;
+    if (fx) DATA.fixed = [...(DATA.fixed || []), fx];
+    doNowView(); nav();
+    try {
+      await fetch(CFG.base + "/done", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: b.dataset.id }) });
+      if (fx) await fetch(CFG.base + "/fixed", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(fx) });
+    } catch (e) {}
+  }));
+}
+
+function draw(all) {
+  doNowView();
+  chutesView(); // always: its "min ago" and the stopped-host warning move on even when the data doesn't
+  if (all) { feederView(); alertsView(); errorsView(); }
+  if (current === "alerts" && !document.hidden) markSeen();
+  nav();
+}
+let loading = false;
+async function load() {
+  if (loading) return;
+  loading = true;
+  try {
+    const res = await fetch(CFG.base + "/data", { cache: "no-store" });
+    if (!res.ok) throw new Error(res.status);
+    const text = await res.text();
+    const changed = text !== raw;
+    if (changed) {
+      DATA = JSON.parse(text); raw = text;
+      try { localStorage.setItem("app_data", text); } catch (e) {}
+    }
+    fresh = true; offline = false;
+    draw(changed);
+  } catch (e) {
+    if (!fresh) { offline = true; draw(false); }
+  }
+  loading = false;
+}
+// ---- Scan tab: read bag labels on the floor with the camera, many at a time (zxing-wasm reads every barcode
+// in each frame). Only bag numbers count; package labels in the frame are skipped. The list is kept on the
+// phone as it grows; Send uploads the whole batch (one storage write), the ops host matches it with the WMS.
+const ZXING = "https://cdn.jsdelivr.net/npm/zxing-wasm@3.1.6/dist/iife/reader/index.js";
+const READ = { formats: ["Code128", "QRCode", "DataMatrix", "Code39"], maxNumberOfSymbols: 12, tryHarder: true };
+const BAG = /^(BG01\\d{8,13}-\\d{1,3}|SB\\d{10,14})$/; // sorter bags (BG01…-chute) and hand-made bags (SB…)
+const PKG = /^[A-Z0-9]{10,40}$/; // a package label (tracking number), in "Package in box" mode
+const SC = { id: "", codes: [], sent: 0, stream: null, timer: 0, lib: null, other: 0, lastOther: "", mode: "bag", lastPkgAt: 0 };
+try { Object.assign(SC, JSON.parse(localStorage.getItem("app_scan") || "{}")); } catch (e) {}
+SC.stream = null; SC.lib = null;
+if (!SC.id) SC.id = String(Date.now());
+const $ = (id) => document.getElementById(id);
+const scSave = () => { try { localStorage.setItem("app_scan", JSON.stringify({ id: SC.id, codes: SC.codes, sent: SC.sent, mode: SC.mode })); } catch (e) {} };
+let AC = null;
+function beep(hz) {
+  try { const o = AC.createOscillator(), g = AC.createGain(); o.frequency.value = hz; o.connect(g); g.connect(AC.destination);
+    g.gain.setValueAtTime(0.3, AC.currentTime); g.gain.exponentialRampToValueAtTime(0.001, AC.currentTime + 0.12);
+    o.start(); o.stop(AC.currentTime + 0.13); } catch (e) {}
+  if (navigator.vibrate) navigator.vibrate(40);
+}
+function scLib() {
+  if (!SC.lib) SC.lib = new Promise((ok, bad) => { const s = document.createElement("script"); s.src = ZXING;
+    s.onload = () => ok(window.ZXingWASM);
+    s.onerror = () => { SC.lib = null; bad(new Error("Couldn't load the scanner. Check the internet and tap Start again.")); };
+    document.head.appendChild(s); });
+  return SC.lib;
+}
+function scDraw(msg) {
+  $("sc-n").textContent = SC.codes.length;
+  if (msg) $("sc-last").textContent = msg;
+  const unsent = SC.codes.length - SC.sent;
+  $("sc-send").textContent = unsent > 0 ? "Send " + unsent + " new" : SC.codes.length ? "Sent ✓" : "Send";
+  $("sc-list").innerHTML = SC.codes.length ? SC.codes.slice().reverse().slice(0, 400).map((c, i) => '<div class="code"><span>' + esc(c.code) +
+    (c.kind === "pkg" ? ' <small>package</small>' : "") + "</span><small>" + esc(new Date(c.at).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", second: "2-digit" })) + "</small></div>").join("")
+    : '<span class="empty">Nothing scanned yet.</span>';
+}
+function scAdd(text) {
+  const code = String(text || "").trim().toUpperCase();
+  if (!code) return;
+  let kind = "bag";
+  if (!BAG.test(code)) {
+    // Package mode: one package per box. Ignore other packages in view for 2 s after one is taken, so a
+    // box with several labels showing counts once.
+    if (SC.mode === "pkg" && PKG.test(code) && Date.now() - SC.lastPkgAt > 2000) kind = "pkg";
+    else { if (code !== SC.lastOther) { SC.other++; SC.lastOther = code; $("sc-note").textContent = "Skipped: " + code; } return; }
+  }
+  if (SC.codes.some((c) => c.code === code)) return;
+  if (kind === "pkg") SC.lastPkgAt = Date.now();
+  SC.codes.push({ code, at: new Date().toISOString(), kind });
+  scSave(); beep(1400);
+  const f = $("sc-flash"); f.classList.add("on"); setTimeout(() => f.classList.remove("on"), 60);
+  scDraw("Last: " + code);
+}
+const canvas = document.createElement("canvas");
+const ctx2d = canvas.getContext("2d", { willReadFrequently: true });
+async function scLoop(lib) {
+  if (!SC.stream) return;
+  const v = $("sc-video");
+  if (v.videoWidth) {
+    const k = Math.min(1, 1600 / Math.max(v.videoWidth, v.videoHeight));
+    canvas.width = Math.round(v.videoWidth * k); canvas.height = Math.round(v.videoHeight * k);
+    ctx2d.drawImage(v, 0, 0, canvas.width, canvas.height);
+    try { (await lib.readBarcodes(ctx2d.getImageData(0, 0, canvas.width, canvas.height), READ)).forEach((r) => { if (r.isValid !== false) scAdd(r.text); }); } catch (e) {}
+  }
+  SC.timer = setTimeout(() => scLoop(lib), 40);
+}
+async function scStart() {
+  if (SC.stream) { scStop(); return; }
+  const btn = $("sc-start");
+  btn.disabled = true; $("sc-msg").textContent = "Starting…";
+  try {
+    AC = AC || new (window.AudioContext || window.webkitAudioContext)(); AC.resume(); // sound needs this tap
+    const lib = await scLib();
+    SC.stream = await navigator.mediaDevices.getUserMedia({ audio: false,
+      video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1080 } } });
+    const v = $("sc-video"); v.srcObject = SC.stream; await v.play();
+    $("sc-msg").textContent = ""; btn.textContent = "Stop camera";
+    scLoop(lib);
+  } catch (e) {
+    scStop();
+    $("sc-msg").textContent = e && e.name === "NotAllowedError" ? "Camera blocked. Settings → Safari (or Sorter) → Camera → Allow, then try again." : (e.message || String(e));
+  }
+  btn.disabled = false;
+}
+function scStop() {
+  clearTimeout(SC.timer);
+  if (SC.stream) SC.stream.getTracks().forEach((t) => t.stop());
+  SC.stream = null;
+  const v = $("sc-video"); if (v) v.srcObject = null;
+  if ($("sc-start")) { $("sc-start").textContent = "Start camera"; $("sc-msg").textContent = SC.codes.length ? "Paused" : "Tap Start camera"; }
+}
+async function scSend() {
+  if (!SC.codes.length) { $("sc-note").textContent = "Nothing scanned yet."; return; }
+  const btn = $("sc-send"); btn.disabled = true; btn.textContent = "Sending…";
+  try {
+    const n = SC.codes.length;
+    const r = await fetch(CFG.base + "/scans", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: SC.id, codes: SC.codes }) });
+    if (!r.ok) throw new Error("error " + r.status);
+    SC.sent = n; scSave(); $("sc-note").textContent = "Sent " + n + " bag labels ✓";
+  } catch (e) { $("sc-note").textContent = "Not sent (" + e.message + "). The list stays on the phone; try again."; }
+  btn.disabled = false; scDraw();
+}
+function scNew() {
+  if (SC.codes.length > SC.sent && !confirm("Clear " + (SC.codes.length - SC.sent) + " labels that weren't sent?")) return;
+  Object.assign(SC, { id: String(Date.now()), codes: [], sent: 0, other: 0, lastOther: "" }); scSave();
+  $("sc-note").textContent = ""; scDraw("New batch. Point the camera at bag labels.");
+}
+// Modes: floor bag labels, a package from a box with no label, and the labels to print.
+const MODE_TEXT = { bag: ["Scan labels", "Point the camera at the bag labels on the boxes on the floor. Each new one beeps; repeats are skipped."],
+  pkg: ["Package in box", "For a box with no label: scan ONE package from inside it, then the next box. A bag label scanned here counts as a floor label."] };
+function scMode(m) {
+  SC.mode = m; scSave();
+  document.querySelectorAll("#sc-mode button").forEach((b) => b.classList.toggle("on", b.dataset.m === m));
+  $("sc-scan").hidden = m === "labels"; $("sc-labels").hidden = m !== "labels";
+  if (m === "labels") { scStop(); labelsView(); return; }
+  $("sc-title").textContent = MODE_TEXT[m][0]; $("sc-last").textContent = MODE_TEXT[m][1];
+}
+async function labelsView() {
+  const box = $("sc-labels");
+  box.innerHTML = '<div class="card empty">Loading…</div>';
+  let L = null;
+  try { L = await (await fetch(CFG.base + "/labels", { cache: "no-store" })).json(); } catch (e) {}
+  if (!L || !(L.items || []).length) { box.innerHTML = '<h1>Labels</h1><div class="card empty">Nothing yet. Scan, tap Send, and within 2 minutes the ops host works out each box here.</div>'; return; }
+  const made = L.items.filter((x) => x.print).length;
+  const sent = L.items.filter((x) => x.print && /label printer/.test(x.status || "")).length;
+  // New labels go to the label printer, and stay in a PDF on the ops host as a backup;
+  // this list says what was done and which box each new label goes on.
+  box.innerHTML = '<h1>Labels</h1><div class="sub">Made ' + esc(clock(L.made)) + " from " + esc(L.scanned) + " scans</div>" +
+    (made ? '<div class="card"><b>' + made + " new label" + (made === 1 ? "" : "s") + (sent === made ? "</b> sent to the label printer." : '</b>: ' + sent + ' sent to the label printer, the rest in "' + esc(L.doc || "Bag labels.pdf") + '" on the ops host.') + "</div>" : "") +
+    L.items.map((x) => '<div class="card lab"><div class="route">' + esc(x.route || x.dest || "") + ' <span class="tag ' + (x.print ? "" : x.wait ? "wait" : "keep") + '">' +
+      (x.print ? "NEW LABEL" : x.wait ? "WAIT" : "KEEP LABEL") + '</span></div><div class="bagno">' + esc(x.bag) + " · " + esc(x.pcs) + " pcs · chute " + esc(x.chute) + "</div>" +
+      '<div class="on">' + esc(x.goesOn) + "</div>" + (x.status ? '<div class="note">' + esc(x.status) + "</div>" : x.merge && x.merge.length ? '<div class="note">To merge into it: ' + esc(x.merge.join(", ")) + "</div>" : "") + "</div>").join("") +
+    ((L.notes || []).length ? "<h2>Notes</h2>" + L.notes.map((n) => '<div class="card empty">' + esc(n) + "</div>").join("") : "");
+}
+document.querySelectorAll("#sc-mode button").forEach((b) => b.addEventListener("click", () => scMode(b.dataset.m)));
+scMode(SC.mode === "labels" ? "bag" : SC.mode || "bag");
+$("sc-start").addEventListener("click", scStart);
+$("sc-send").addEventListener("click", scSend);
+$("sc-new").addEventListener("click", scNew);
+scDraw();
+show(current);
+draw(true); // what was saved last time, right away
+load().then(() => setTimeout(preload, 1000));
+checkNotify();
+setInterval(tick, 1000);
+setInterval(() => { if (!document.hidden) load(); }, 30000);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) load(); else scStop(); });
+</script>
+</body>
+</html>`;
+}

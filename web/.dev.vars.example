@@ -1,0 +1,9 @@
+# Copy to web/.dev.vars for `wrangler dev` (never commit .dev.vars). With DEMO=true, any key left out here
+# falls back to the demo keys in src/demo.js.
+DEMO=true
+APP_PUSH_KEY=change-me-push-key
+APP_VIEW_KEY=change-me-app-view-key
+TRUCKS_VIEW_KEY=change-me-trucks-view-key
+UNSORTED_VIEW_KEY=change-me-unsorted-view-key
+PDA_VIEW_KEY=change-me-pda-view-key
+WMS_TOKEN=any-token-the-simulator-accepts

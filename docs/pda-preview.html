@@ -1,0 +1,560 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<meta name="color-scheme" content="light">
+<title>PDA speed board</title>
+<style>
+:root { color-scheme: light; --bg: #f7f8fa; --card: #fff; --text: #262626; --muted: #8c8c8c; --line: #e8e8e8; --accent: #ff4800;
+        --soft: #fff1e6; --top: #001529; --topsub: #a3b1bf;
+        --note: #fff7f0; --noteline: #ffd8bf; --q: #d48806; --idle: #f5222d; }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text);
+       font: 14px/1.5 "Helvetica Neue", Helvetica, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", Arial, sans-serif; }
+/* Navy top bar */
+header { background: var(--top); color: #fff; display: flex; align-items: center; gap: 12px;
+         padding: 14px max(16px, calc((100% - 760px) / 2 + 16px)); }
+header > div { flex: 1; min-width: 0; }
+h1 { font-size: 20px; font-weight: 600; margin: 0; color: #fff; }
+.sub { color: var(--topsub); font-size: 13px; margin-top: 2px; }
+/* Tabs: white strip, the open one orange with an orange underline */
+nav { position: sticky; top: 0; z-index: 2; background: var(--card); border-bottom: 1px solid var(--line); }
+nav div { display: flex; gap: 4px; padding: 0 16px; overflow-x: auto; max-width: 760px; margin: 0 auto; }
+button { font: inherit; cursor: pointer; }
+nav button { border: 0; border-bottom: 2px solid transparent; background: none; color: var(--text);
+             padding: 12px 14px 10px; font-size: 15px; white-space: nowrap; }
+nav button:hover { color: var(--accent); }
+nav button.on { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
+.seg button { border: 1px solid var(--line); background: var(--card); color: var(--text); padding: 6px 15px; font-size: 14px; }
+.seg button.on { background: var(--soft); border-color: var(--accent); color: var(--accent); font-weight: 600; }
+main { padding: 0 16px 36px; max-width: 760px; margin: 0 auto; }
+section { background: var(--card); border: 1px solid var(--line); border-radius: 4px; padding: 14px 16px; margin-top: 12px;
+          box-shadow: 0 1px 2px rgba(0, 21, 41, .04); }
+/* Section titles with the orange bar on the left */
+h2 { font-size: 16px; font-weight: 600; margin: 0 0 4px; padding-left: 10px; border-left: 4px solid var(--accent); line-height: 1.2; }
+.explain { color: var(--muted); font-size: 13px; margin: 0 0 6px; }
+.row { display: grid; grid-template-columns: 26px minmax(0, 1fr) auto; column-gap: 8px; row-gap: 4px;
+       align-items: center; padding: 8px 0; border-top: 1px solid var(--line); }
+.row:first-of-type { border-top: 0; }
+.rank { color: var(--muted); font-size: 12px; text-align: right; font-variant-numeric: tabular-nums; }
+.name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.meta { color: var(--muted); font-size: 12px; font-weight: 400; white-space: normal; }
+.rate { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.rate b { font-size: 15px; } .rate span { display: block; color: var(--muted); font-size: 12px; }
+.bar { grid-column: 2 / 4; height: 9px; background: var(--line); border-radius: 5px; overflow: hidden; }
+.bar i { display: block; height: 100%; border-radius: 5px; }
+.q .rank, .q .name, .q .who { color: var(--q); }
+.who { font-weight: 600; }
+.idle .rank, .idle .name { color: var(--idle); }
+.notes { background: var(--note); border-color: var(--noteline); }
+.notes p { margin: 6px 0; } .notes b { font-weight: 600; }
+.seg { display: flex; gap: 6px; margin: 8px 0 4px; }
+.seg button { flex: 1; padding: 6px 8px; white-space: normal; border-radius: 4px; }
+.empty { color: var(--muted); font-size: 14px; padding: 6px 0; }
+.help { color: var(--muted); font-size: 12px; margin: 16px 2px 0; }
+.row.click { cursor: pointer; border-radius: 4px; }
+.row.click:hover { background: color-mix(in srgb, var(--accent) 7%, transparent); }
+.backdrop { position: fixed; inset: 0; z-index: 10; background: rgba(0, 0, 0, .45); display: flex; align-items: flex-end; justify-content: center; }
+.sheet { background: var(--card); color: var(--text); width: 100%; max-width: 760px; max-height: 92vh; overflow: auto;
+         border-radius: 8px 8px 0 0; padding: 14px 16px 22px; box-sizing: border-box; }
+@media (min-width: 700px) { .backdrop { align-items: center; } .sheet { border-radius: 8px; } }
+.sheet-head { display: flex; align-items: flex-start; gap: 10px; }
+.sheet-head h3 { margin: 0; font-size: 18px; }
+.sheet-head .meta { font-size: 13px; margin-top: 2px; }
+.close { border: 0; background: var(--line); color: var(--text); width: 32px; height: 32px; border-radius: 4px; font-size: 18px; line-height: 1; cursor: pointer; }
+.stats { display: flex; gap: 18px; flex-wrap: wrap; margin: 10px 0 4px; }
+.stats div { font-size: 12px; color: var(--muted); } .stats b { display: block; font-size: 18px; color: var(--text); font-variant-numeric: tabular-nums; }
+.chart { position: relative; margin-top: 6px; }
+.chart svg { display: block; width: 100%; height: auto; touch-action: pan-y; }
+.chart text { fill: var(--muted); font-size: 12px; font-family: inherit; }
+.modes { display: flex; gap: 6px; padding: 10px 16px 0; max-width: 760px; margin: 0 auto; }
+.modes button { flex: 1; border: 1px solid var(--line); background: var(--card); color: var(--text); padding: 8px 10px;
+                font-size: 15px; border-radius: 4px; }
+.modes button.on { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+.star { color: var(--q); font-weight: 700; }
+.warn { color: var(--q); font-size: 13px; margin: 10px 0 0; }
+.names { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.names figure { margin: 0; border: 1px solid var(--line); border-radius: 4px; padding: 4px; max-width: calc(50% - 4px); background: #fff; }
+.names img { display: block; max-width: 100%; height: auto; }
+.names figcaption { font-size: 12px; color: var(--muted); margin-top: 2px; }
+h4 { font-size: 14px; margin: 14px 0 0; }
+.tip { position: absolute; pointer-events: none; background: var(--text); color: var(--card); font-size: 12px; padding: 4px 8px;
+       border-radius: 4px; white-space: nowrap; transform: translate(-50%, -115%); display: none; }
+</style>
+</head>
+<body>
+<header><div><h1 id="title">PDA speed board</h1><div class="sub" id="sub"></div></div></header>
+<nav><div class="modes" id="modes"></div><div id="tabs"></div></nav>
+<main id="main"></main>
+<div id="detail"></div>
+<script>
+const DATA = {"board":{"updated":"2026-11-25 20:28:19","day":"2026-11-25","live":false,"tabs":{"VA":{"people":[{"name":"Ana Reyes","tab":"VA","id":"EVA1","written":"Ana","pdas":["VA_02"],"parcels":5326,"hours":10,"hourly":[0,0,0,0,0,0,0,0,0,492,520,546,451,619,580,489,463,619,547,0,0,0,0,0],"lastHour":18},{"name":"Luis Moreno","tab":"VA","id":"EVA2","written":"Luis","pdas":["VA_03"],"parcels":5320,"hours":10,"hourly":[0,0,0,0,0,0,0,0,0,573,528,575,542,516,568,518,458,596,446,0,0,0,0,0],"lastHour":18},{"name":"Sam Ortiz","tab":"VA","id":"EVA0","written":"Sam","pdas":["VA_01"],"parcels":5299,"hours":10,"hourly":[0,0,0,0,0,0,0,0,0,472,511,513,549,556,515,519,571,602,491,0,0,0,0,0],"lastHour":18},{"name":"Kim Tran","tab":"VA","id":"EVA3","written":"Kim","pdas":["VA_04"],"parcels":5062,"hours":10,"hourly":[0,0,0,0,0,0,0,0,0,569,498,496,550,441,461,506,461,503,577,0,0,0,0,0],"lastHour":18}],"idle":[],"notes":[]},"VB":{"people":[{"name":"Dee Carter","tab":"VB","id":"EVB0","written":"Dee","pdas":["VB_01"],"parcels":5451,"hours":10,"hourly":[0,0,0,0,0,0,0,0,0,623,538,470,486,592,543,507,583,633,476,0,0,0,0,0],"lastHour":18},{"name":"Joel Price","tab":"VB","id":"EVB1","written":"Joel","pdas":["VB_02"],"parcels":5333,"hours":10,"hourly":[0,0,0,0,0,0,0,0,0,555,587,476,536,445,565,548,538,582,501,0,0,0,0,0],"lastHour":18},{"name":"Nina Lopez","tab":"VB","id":"EVB2","written":"Nina","pdas":["VB_03"],"parcels":4349,"hours":10,"hourly":[0,0,0,0,0,0,0,0,0,420,481,464,438,412,459,470,393,443,369,0,0,0,0,0],"lastHour":18}],"idle":[],"notes":[]},"VC":{"people":[{"name":"Raj Patel","tab":"VC","id":"EVC0","written":"Raj","pdas":["VC_01"],"parcels":4935,"hours":10,"hourly":[0,0,0,0,0,0,0,0,0,510,492,476,488,439,538,479,567,512,434,0,0,0,0,0],"lastHour":18},{"name":"Eva Brooks","tab":"VC","id":"EVC1","written":"Eva","pdas":["VC_02"],"parcels":4585,"hours":10,"hourly":[0,0,0,0,0,0,0,0,0,510,439,509,373,459,475,439,451,464,466,0,0,0,0,0],"lastHour":18}],"idle":[],"notes":[]},"OTHER":{"people":[],"idle":[],"notes":[]}}},"history":{"2026-11-24":[["Ana Reyes","VA","EVA1",5608,10],["Luis Moreno","VA","EVA2",5397,10],["Sam Ortiz","VA","EVA0",5860,10],["Kim Tran","VA","EVA3",5578,10],["Dee Carter","VB","EVB0",4732,10],["Joel Price","VB","EVB1",5168,10],["Nina Lopez","VB","EVB2",4175,10],["Raj Patel","VC","EVC0",4801,10],["Eva Brooks","VC","EVC1",4561,10]],"2026-11-23":[["Ana Reyes","VA","EVA1",5124,10],["Luis Moreno","VA","EVA2",5096,10],["Sam Ortiz","VA","EVA0",6054,10],["Kim Tran","VA","EVA3",4434,10],["Dee Carter","VB","EVB0",5288,10],["Joel Price","VB","EVB1",4837,10],["Nina Lopez","VB","EVB2",4101,10],["Raj Patel","VC","EVC0",4639,10],["Eva Brooks","VC","EVC1",4108,10]],"2026-11-22":[["Ana Reyes","VA","EVA1",5217,10],["Luis Moreno","VA","EVA2",5737,10],["Sam Ortiz","VA","EVA0",5287,10],["Kim Tran","VA","EVA3",5726,10],["Dee Carter","VB","EVB0",4992,10],["Joel Price","VB","EVB1",5318,10],["Nina Lopez","VB","EVB2",3733,10],["Raj Patel","VC","EVC0",4582,10],["Eva Brooks","VC","EVC1",5140,10]],"2026-11-21":[["Ana Reyes","VA","EVA1",5673,10],["Luis Moreno","VA","EVA2",5619,10],["Sam Ortiz","VA","EVA0",4674,10],["Kim Tran","VA","EVA3",5239,10],["Dee Carter","VB","EVB0",5511,10],["Joel Price","VB","EVB1",4890,10],["Nina Lopez","VB","EVB2",4353,10],["Raj Patel","VC","EVC0",5418,10],["Eva Brooks","VC","EVC1",4098,10]],"2026-11-20":[["Ana Reyes","VA","EVA1",5173,10],["Luis Moreno","VA","EVA2",4649,10],["Sam Ortiz","VA","EVA0",5258,10],["Kim Tran","VA","EVA3",4714,10],["Dee Carter","VB","EVB0",6120,10],["Joel Price","VB","EVB1",5386,10],["Nina Lopez","VB","EVB2",4663,10],["Raj Patel","VC","EVC0",4455,10],["Eva Brooks","VC","EVC1",4037,10]],"2026-11-19":[["Ana Reyes","VA","EVA1",5734,10],["Luis Moreno","VA","EVA2",5821,10],["Sam Ortiz","VA","EVA0",4716,10],["Kim Tran","VA","EVA3",5500,10],["Dee Carter","VB","EVB0",5307,10],["Joel Price","VB","EVB1",5952,10],["Nina Lopez","VB","EVB2",3713,10],["Raj Patel","VC","EVC0",5600,10],["Eva Brooks","VC","EVC1",4300,10]],"2026-11-18":[["Ana Reyes","VA","EVA1",4734,10],["Luis Moreno","VA","EVA2",5903,10],["Sam Ortiz","VA","EVA0",4569,10],["Kim Tran","VA","EVA3",5054,10],["Dee Carter","VB","EVB0",6226,10],["Joel Price","VB","EVB1",4991,10],["Nina Lopez","VB","EVB2",4662,10],["Raj Patel","VC","EVC0",4455,10],["Eva Brooks","VC","EVC1",4208,10]],"2026-11-17":[["Ana Reyes","VA","EVA1",5069,10],["Luis Moreno","VA","EVA2",5999,10],["Sam Ortiz","VA","EVA0",5330,10],["Kim Tran","VA","EVA3",5171,10],["Dee Carter","VB","EVB0",5836,10],["Joel Price","VB","EVB1",6009,10],["Nina Lopez","VB","EVB2",3781,10],["Raj Patel","VC","EVC0",4896,10],["Eva Brooks","VC","EVC1",4816,10]],"2026-11-16":[["Ana Reyes","VA","EVA1",5735,10],["Luis Moreno","VA","EVA2",4871,10],["Sam Ortiz","VA","EVA0",4546,10],["Kim Tran","VA","EVA3",5579,10],["Dee Carter","VB","EVB0",5558,10],["Joel Price","VB","EVB1",5952,10],["Nina Lopez","VB","EVB2",4281,10],["Raj Patel","VC","EVC0",4923,10],["Eva Brooks","VC","EVC1",4558,10]],"2026-11-15":[["Ana Reyes","VA","EVA1",4692,10],["Luis Moreno","VA","EVA2",4960,10],["Sam Ortiz","VA","EVA0",4795,10],["Kim Tran","VA","EVA3",4619,10],["Dee Carter","VB","EVB0",5564,10],["Joel Price","VB","EVB1",5523,10],["Nina Lopez","VB","EVB2",3740,10],["Raj Patel","VC","EVC0",5328,10],["Eva Brooks","VC","EVC1",4144,10]]},"errors":{"updated":"2026-11-25 16:28:19","days":{"2026-11-24":[["Ana Reyes","VA","EVA1",7456,2,1,"checked"],["Luis Moreno","VA","EVA2",7448,2,0.5,"checked"],["Sam Ortiz","VA","EVA0",7419,0,0,"checked"],["Kim Tran","VA","EVA3",7087,2,1,"checked"],["Dee Carter","VB","EVB0",7631,2,1.8,"checked"],["Joel Price","VB","EVB1",7466,1,0.2,"checked"],["Nina Lopez","VB","EVB2",6089,2,0.3,"checked"],["Raj Patel","VC","EVC0",6909,2,1.2,"checked"],["Eva Brooks","VC","EVC1",6419,2,1.5,"checked"]],"2026-11-23":[["Ana Reyes","VA","EVA1",7456,1,1.3,"checked"],["Luis Moreno","VA","EVA2",7448,3,0.3,"checked"],["Sam Ortiz","VA","EVA0",7419,2,0.2,"checked"],["Kim Tran","VA","EVA3",7087,2,1.2,"checked"],["Dee Carter","VB","EVB0",7631,0,0.8,"checked"],["Joel Price","VB","EVB1",7466,0,0.8,"checked"],["Nina Lopez","VB","EVB2",6089,1,1.2,"checked"],["Raj Patel","VC","EVC0",6909,3,1.2,"checked"],["Eva Brooks","VC","EVC1",6419,2,2,"checked"]],"2026-11-22":[["Ana Reyes","VA","EVA1",7456,3,1.4,"checked"],["Luis Moreno","VA","EVA2",7448,1,0.1,"checked"],["Sam Ortiz","VA","EVA0",7419,1,0.3,"checked"],["Kim Tran","VA","EVA3",7087,0,0.1,"checked"],["Dee Carter","VB","EVB0",7631,2,0,"checked"],["Joel Price","VB","EVB1",7466,3,1.8,"checked"],["Nina Lopez","VB","EVB2",6089,0,1.8,"checked"],["Raj Patel","VC","EVC0",6909,2,0,"checked"],["Eva Brooks","VC","EVC1",6419,1,0.6,"checked"]],"2026-11-21":[["Ana Reyes","VA","EVA1",7456,2,1.4,"checked"],["Luis Moreno","VA","EVA2",7448,3,1.3,"checked"],["Sam Ortiz","VA","EVA0",7419,0,1.2,"checked"],["Kim Tran","VA","EVA3",7087,1,1.8,"checked"],["Dee Carter","VB","EVB0",7631,2,1.3,"checked"],["Joel Price","VB","EVB1",7466,1,0.6,"checked"],["Nina Lopez","VB","EVB2",6089,2,0.7,"checked"],["Raj Patel","VC","EVC0",6909,2,1.2,"checked"],["Eva Brooks","VC","EVC1",6419,2,2,"checked"]],"2026-11-20":[["Ana Reyes","VA","EVA1",7456,2,0.5,"checked"],["Luis Moreno","VA","EVA2",7448,1,1.6,"checked"],["Sam Ortiz","VA","EVA0",7419,0,0.8,"checked"],["Kim Tran","VA","EVA3",7087,1,1.5,"checked"],["Dee Carter","VB","EVB0",7631,2,0.7,"checked"],["Joel Price","VB","EVB1",7466,3,0.9,"checked"],["Nina Lopez","VB","EVB2",6089,1,1.1,"checked"],["Raj Patel","VC","EVC0",6909,3,0.9,"checked"],["Eva Brooks","VC","EVC1",6419,0,0.7,"checked"]],"2026-11-19":[["Ana Reyes","VA","EVA1",7456,0,1.9,"checked"],["Luis Moreno","VA","EVA2",7448,2,0.5,"checked"],["Sam Ortiz","VA","EVA0",7419,1,0.3,"checked"],["Kim Tran","VA","EVA3",7087,2,1.6,"checked"],["Dee Carter","VB","EVB0",7631,2,0.8,"checked"],["Joel Price","VB","EVB1",7466,0,1.6,"checked"],["Nina Lopez","VB","EVB2",6089,2,1,"checked"],["Raj Patel","VC","EVC0",6909,2,1.9,"checked"],["Eva Brooks","VC","EVC1",6419,0,1.6,"checked"]],"2026-11-18":[["Ana Reyes","VA","EVA1",7456,3,0.5,"checked"],["Luis Moreno","VA","EVA2",7448,1,0.5,"checked"],["Sam Ortiz","VA","EVA0",7419,1,0.9,"checked"],["Kim Tran","VA","EVA3",7087,2,1.2,"checked"],["Dee Carter","VB","EVB0",7631,1,0.4,"checked"],["Joel Price","VB","EVB1",7466,0,1,"checked"],["Nina Lopez","VB","EVB2",6089,1,0.5,"checked"],["Raj Patel","VC","EVC0",6909,0,0.7,"checked"],["Eva Brooks","VC","EVC1",6419,0,1.4,"checked"]]}},"company":null,"names":{}};
+// Every word on the page, in one place.
+const clockOf = (h, m) => (h % 12 || 12) + ":" + String(m).padStart(2, "0") + (h < 12 ? " AM" : " PM");
+const TEXT = {
+  en: {
+    htmlLang: "en", title: "PDA speed board",
+    tabs: { ALL: "All", VA: "Vendor A", VB: "Vendor B", VC: "Vendor C", OTHER: "Other" },
+    periods: { "7": "Last 7 days", "30": "Last 30 days", all: "All time" },
+    active: { all: "Everyone", recent: "Scanned in the last hour", quiet: "Not in the last hour" },
+    views: { day: "Day", week: "Week", month: "Month" },
+    weekdays: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"],
+    noData: "No data yet.", noOne: "No one yet.", perHour: "/hr", secEach: " sec each", nameQ: "name?",
+    clock: (hm) => { const [h, m] = hm.split(":").map(Number); return clockOf(h, m); },
+    sub: (live, names) => "Live from WMS at " + live + " · names from sheets read at " + names,
+    subNoSheets: (live) => "Live from WMS at " + live + " · no sign-in sheets posted yet, so no names",
+    updated: (day, time) => "Updated " + day + " at " + time,
+    allMeans: " · All = Vendors A, B and C",
+    parcelsIn: (p, h) => p + " parcels in " + h + " h",
+    wrote: (w) => 'wrote "' + w + '"',
+    lastScanned: (when, box) => "last scanned " + (box ? box + " " : "") + when,
+    ago: (m) => (m < 5 ? "<5 min ago" : m < 60 ? m + " min ago" : Math.floor(m / 60) + " h " + (m % 60) + " min ago"),
+    hourRange: (col) => {
+      const h = (6 + col) % 24, next = (h + 1) % 24, label = (x) => x % 12 || 12, half = (x) => (x < 12 ? "AM" : "PM");
+      return half(h) === half(next) ? label(h) + "–" + label(next) + " " + half(next) : label(h) + " " + half(h) + "–" + label(next) + " " + half(next);
+    },
+    hourTick: (col) => { const h = (6 + col) % 24; return (h % 12 || 12) + (h < 12 ? "a" : "p"); },
+    shiftTitle: (live, day) => (live ? "Today's shift" : "Last shift") + " (" + day + "): fastest to slowest",
+    shiftExplain: 'Parcels per hour while their PDA was scanning. Short green bar = fast, long red bar = slow. A PDA in orange with "name?" is being used, but nobody signed for it.',
+    idle: "signed out, but it scanned nothing",
+    wrong: "What looks wrong",
+    boardTitle: "Average speed leaderboard",
+    boardExplain: (since) => "Average parcels per hour over every day they used a PDA" + (since ? " since " + since : "") + ".",
+    daysParcels: (d, p) => d + (d === 1 ? " day" : " days") + " · " + p + " parcels",
+    help: "Tap anyone to see their speed hour by hour, or day by day over a week or a month. Names are the sheet reader's best reading of the handwritten sign-out sheets, matched to attendance when it can. Speed counts only hours the PDA actually scanned, so it works before attendance comes in.",
+    nobodySigned: "nobody signed for this PDA", close: "Close",
+    speed: "Speed", parcels: "Parcels", hoursScanning: "Hours scanning", bestHour: "Best hour", average: "Average", daysWorked: "Days worked",
+    dayExplain: (live, day) => (live ? "Today" : day) + ": parcels scanned in each hour. An hour they only worked part of shows lower.",
+    rangeExplain: (count) => "Their speed (parcels per hour) each day of the last " + count + " days. Gaps are days they didn't work.",
+    hourTip: (range, p) => range + ": " + p + " parcels",
+    dayTip: (rate, p, h) => ": " + rate + "/hr · " + p + " parcels in " + h + " h",
+    off: ": didn't work",
+    modes: { speed: "Speed", errors: "Error rates" },
+    errorTitle: "PDA error board",
+    errorsHead: "Missed scans and mis-sorts per 10,000 parcels",
+    errorsExplain: (since, avg) => "Each person's missed bagging scans and mis-sorts" + (since ? " since " + since : "") +
+      ", per 10,000 parcels they scanned. Highest first." + (avg != null ? " Crew average: " + avg + " per 10k." : ""),
+    perTenK: " /10k", missedN: (n) => n + " missed", missortN: (n) => n + " mis-sorted",
+    nightsParcels: (d, p) => d + (d === 1 ? " night" : " nights") + " · " + p + " parcels",
+    nameGuess: "name not confirmed",
+    notEnough: "* Not ranked yet: under 10,000 parcels. One or two misses move these rates a lot, so don't judge them yet.",
+    errorsHelp: "A miss counts for whoever had the PDA then (from the timesheet or sign-out sheet): a bagging scan into the wrong station's bag, a 'bagging failed' that still left that night, a check-in with no bagging scan, or, for a package no one scanned, the PDA that bagged its box-mates in the same section. When two PDAs bagged those back and forth, each gets its share (like 0.7 and 0.3). A whole bag sent to the wrong place, or a box no one had to sort, isn't anyone's, and neither is a moment two people could have had the PDA. “Name not confirmed” means the sheet reader read the handwriting but nobody has checked it.",
+    noErrors: "No error numbers yet.",
+    errorsUpdated: (d) => "Error numbers updated " + d,
+    errorRate: (p) => "Error rate, " + p.toLowerCase(), errorCounts: (m, s) => m + " missed · " + s + " mis-sorted",
+    onSheet: "Their name on the sign-out sheets", noSheetPics: "No pictures of their name from the sign-out sheets yet.",
+    sheetPic: (day, w) => day + ' · wrote "' + w + '"',
+  },
+};
+const L = () => TEXT.en;
+// A labor company's own board has only its own tab, and its name in the title.
+const COMPANY = DATA.company;
+const COMPANY_NAMES = { VA: "Vendor A", VB: "Vendor B", VC: "Vendor C" };
+const titled = (t) => (COMPANY ? COMPANY_NAMES[COMPANY] + " · " + t : t);
+const TABS = COMPANY ? [COMPANY] : ["ALL", "VA", "VB", "VC", "OTHER"];
+const NAMES = new Proxy({}, { get: (_, k) => L().tabs[k] });
+const PERIODS = ["7", "30", "all"];
+let tab = (location.hash.slice(1).replace(/^errors-?/, "") || TABS[0]).toUpperCase();
+if (!TABS.includes(tab)) tab = TABS[0];
+let mode = location.hash.startsWith("#errors") ? "errors" : "speed";
+let period = "7";
+try { period = localStorage.getItem("pda-period") || "7"; } catch (e) {}
+let active = "all";
+try { active = localStorage.getItem("pda-active") || "all"; } catch (e) {}
+
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+const n = (v) => Number(v).toLocaleString("en-US");
+const md = (day) => { const [, m, d] = day.split("-"); return +m + "/" + +d; };
+// "<5 min ago" while it's scanning (the copies are 5 minutes apart), else the minutes.
+const ago = (m) => L().ago(m);
+// Hour column 0 is 6 AM: "3–4 PM", "11 AM–12 PM". Used when the 5-minute copies have no time yet.
+const hourRange = (col) => L().hourRange(col);
+const tabsFor = (t) => (t === "ALL" ? ["VA", "VB", "VC"] : [t]);
+
+// Short green bars for fast people, long red bars for slow: the bar is seconds per parcel, so a
+// 200/hr person's bar is 3 times a 600/hr person's. The full width is twice the median, so one very
+// slow person doesn't squash everyone else's bar; anyone slower than that just fills the bar.
+function barScale(list) {
+  const secs = list.map((p) => 3600 / p.rate).sort((a, b) => a - b);
+  const lo = secs[0], median = secs[Math.floor(secs.length / 2)];
+  const full = Math.max(Math.min(2 * median, secs[secs.length - 1]), lo + 0.1);
+  return (p) => {
+    const sec = 3600 / p.rate;
+    const t = Math.min(Math.max((sec - lo) / (full - lo), 0), 1);
+    return { width: Math.max(4, Math.min(sec / full, 1) * 100), color: "hsl(" + Math.round(120 * (1 - t)) + " 68% 45%)", sec };
+  };
+}
+
+// scale: the list the bars are measured against, so filtering doesn't change anyone's bar.
+function speedRows(list, withTab, scale = list) {
+  if (!list.length) return '<div class="empty">' + L().noOne + "</div>";
+  const bar = barScale(scale);
+  // A PDA nobody signed for shows the PDA's name, with "name?" where the PDA usually goes.
+  return list.map((p, i) => {
+    const b = bar(p);
+    return '<div class="row click' + (p.unsigned ? " q" : "") + '" data-key="' + esc(p.key) + '"><div class="rank">' + (p.rank ?? i + 1) + '</div><div class="name">' + esc(p.name) +
+      '<div class="meta">' + [withTab ? esc(NAMES[p.tab]) : "", p.unsigned ? '<span class="who">' + L().nameQ + "</span>" : esc(p.where), esc(p.detail)]
+        .filter(Boolean).join(" · ") + '</div></div>' +
+      '<div class="rate"><b>' + n(Math.round(p.rate)) + L().perHour + "</b><span>" + b.sec.toFixed(1) + L().secEach + "</span></div>" +
+      '<div class="bar"><i style="width:' + b.width + '%;background:' + b.color + '"></i></div></div>';
+  }).join("");
+}
+
+// Scanned in the last hour: from the 5-minute copies, or else the hour column it last scanned in.
+function scannedLastHour(p, nowCol) {
+  if (p.lastScan != null) return p.lastScan < 60;
+  return p.lastHour != null && nowCol != null && p.lastHour >= nowCol;
+}
+const ACTIVE = ["all", "recent", "quiet"];
+
+function today(board) {
+  const tabs = tabsFor(tab);
+  const people = tabs.flatMap((t) => (board.tabs[t]?.people || []).map((p) => ({
+    name: p.name, tab: p.tab, rate: p.parcels / p.hours, where: p.pdas.join(", "), unsigned: p.unsigned,
+    lastScan: p.lastScan, lastHour: p.lastHour, lastBox: p.lastBox, key: keyOf(p),
+    detail: L().parcelsIn(n(p.parcels), p.hours) + (p.written && p.written !== p.name ? " · " + L().wrote(p.written) : "") +
+      (!board.live ? "" : p.lastScan != null ? " · " + L().lastScanned(ago(p.lastScan), p.lastBox)
+        : p.lastHour != null ? " · " + L().lastScanned(hourRange(p.lastHour), p.lastBox) : ""),
+  }))).sort((a, b) => b.rate - a.rate).map((p, i) => ({ ...p, rank: i + 1 }));
+  let idle = tabs.flatMap((t) => (board.tabs[t]?.idle || []).map((u) => ({ ...u, tab: t })));
+  const nowCol = board.liveAt ? (+board.liveAt.slice(0, 2) - 6 + 24) % 24 : null;
+  const filtering = board.live && nowCol != null;
+  let shown = people;
+  if (filtering && active !== "all") {
+    shown = people.filter((p) => scannedLastHour(p, nowCol) === (active === "recent"));
+    if (active === "recent") idle = [];
+  }
+  const notes = tabs.flatMap((t) => (board.tabs[t]?.notes || []).map((x) => ({ text: x, tab: t })));
+  let html = "<section><h2>" + esc(L().shiftTitle(board.live, md(board.day))) + '</h2><p class="explain">' + esc(L().shiftExplain) + "</p>" +
+    (filtering ? '<div class="seg">' + ACTIVE.map((k) => '<button data-active="' + k + '"' + (k === active ? ' class="on"' : "") + ">" + L().active[k] +
+      (k === "all" ? "" : " (" + people.filter((p) => scannedLastHour(p, nowCol) === (k === "recent")).length + ")") + "</button>").join("") + "</div>" : "") +
+    speedRows(shown, tab === "ALL", people);
+  html += idle.map((u) => '<div class="row idle"><div class="rank">0</div><div class="name">' + esc(u.name) +
+    '<div class="meta">' + (tab === "ALL" ? NAMES[u.tab] + " · " : "") + esc(u.pda) + " · " + L().idle + '</div></div><div class="rate"></div></div>').join("");
+  html += "</section>";
+  if (notes.length) {
+    html += '<section class="notes"><h2>' + L().wrong + "</h2>" +
+      notes.map((x) => "<p>" + (tab === "ALL" ? "<b>" + NAMES[x.tab] + ":</b> " : "") + esc(x.text) + "</p>").join("") + "</section>";
+  }
+  return html;
+}
+
+function leaderboard() {
+  const days = Object.keys(DATA.history).sort();
+  const last = days[days.length - 1];
+  let from = "";
+  if (last && period !== "all") {
+    const d = new Date(last + "T12:00:00Z");
+    d.setUTCDate(d.getUTCDate() - (+period - 1));
+    from = d.toISOString().slice(0, 10);
+  }
+  const people = {};
+  for (const day of days) {
+    if (day < from) continue;
+    for (const [name, t, id, parcels, hours] of DATA.history[day]) {
+      if (!tabsFor(tab).includes(t) || !hours) continue;
+      const key = (id || name.toLowerCase()) + "|" + t;
+      const p = (people[key] ||= { name, tab: t, parcels: 0, hours: 0, days: 0, key });
+      p.parcels += parcels; p.hours += hours; p.days += 1; p.name = name;
+    }
+  }
+  const list = Object.values(people).map((p) => ({ ...p, rate: p.parcels / p.hours,
+    detail: L().daysParcels(p.days, n(p.parcels)) })).sort((a, b) => b.rate - a.rate);
+  return '<section class="board-avg"><h2>' + L().boardTitle + '</h2><div class="seg">' +
+    PERIODS.map((k) => '<button data-period="' + k + '"' + (k === period ? ' class="on"' : "") + ">" + L().periods[k] + "</button>").join("") +
+    '</div><p class="explain">' + esc(L().boardExplain(from ? md(from) : "")) + "</p>" +
+    speedRows(list, tab === "ALL") + "</section>";
+}
+
+// ---- Error rates: missed scans and mis-sorts per 10,000 parcels, per person, from the quality job.
+const ENOUGH = 10000; // Parcels before a rate means much; under it, an asterisk and a warning
+// A miss bagged back and forth by two PDAs is split between them, so counts can be 0.7, 12.3 …
+const dec = (v) => (Math.round(v * 10) / 10).toLocaleString("en-US");
+function errorsView() {
+  const E = DATA.errors;
+  if (!E || !E.days || !Object.keys(E.days).length) return '<section><div class="empty">' + L().noErrors + "</div></section>";
+  const days = Object.keys(E.days).sort();
+  const last = days[days.length - 1];
+  let from = "";
+  if (period !== "all") {
+    const d = new Date(last + "T12:00:00Z");
+    d.setUTCDate(d.getUTCDate() - (+period - 1));
+    from = d.toISOString().slice(0, 10);
+  }
+  const people = {};
+  for (const day of days) {
+    if (day < from) continue;
+    for (const [name, crew, key, parcels, missed, missorts, match] of E.days[day]) {
+      if (!tabsFor(tab).includes(crew)) continue;
+      const p = (people[key + "|" + crew] ||= { name, crew, key, parcels: 0, missed: 0, missorts: 0, nights: 0, guessed: false });
+      p.parcels += parcels; p.missed += missed; p.missorts += missorts; p.nights += 1; p.name = name;
+      p.guessed ||= !["checked", "high", "medium"].includes(match); // Any unconfirmed night shows it
+    }
+  }
+  const list = Object.values(people).filter((p) => p.parcels > 0)
+    .map((p) => ({ ...p, rate: ((p.missed + p.missorts) * 10000) / p.parcels }))
+    .sort((a, b) => b.rate - a.rate || b.parcels - a.parcels);
+  const totalP = list.reduce((a, p) => a + p.parcels, 0), totalE = list.reduce((a, p) => a + p.missed + p.missorts, 0);
+  const avg = totalP ? (totalE * 10000) / totalP : null;
+  // Bar: the rate against twice the crew average; green under the average, red over it.
+  const full = Math.max(1, 2 * (avg || 1), ...list.filter((p) => p.parcels >= ENOUGH).map((p) => p.rate));
+  const row = (p, rank) => {
+    const t = avg ? Math.min(p.rate / (2 * avg), 1) : 0;
+    const short = p.parcels < ENOUGH;
+    const open = boardKeyFor(p.key, p.crew);
+    return '<div class="row' + (open ? ' click" data-key="' + esc(open) + '"' : '"') + '><div class="rank">' + rank + '</div><div class="name">' + esc(p.name) +
+      (short ? ' <span class="star">*</span>' : "") + '<div class="meta">' +
+      [tab === "ALL" ? esc(NAMES[p.crew]) : "", L().nightsParcels(p.nights, n(p.parcels)),
+       L().missedN(dec(p.missed)) + " · " + L().missortN(dec(p.missorts)), p.guessed ? L().nameGuess : ""].filter(Boolean).join(" · ") +
+      '</div></div><div class="rate"><b>' + p.rate.toFixed(1) + L().perTenK + "</b><span>" + dec(p.missed + p.missorts) + "</span></div>" +
+      '<div class="bar"><i style="width:' + Math.max(3, Math.min(p.rate / full, 1) * 100) + "%;background:hsl(" +
+      Math.round(120 * (1 - t)) + ' 68% 45%)"></i></div></div>';
+  };
+  // Ranked: people with enough parcels for the rate to mean something. Under 10,000 parcels, one or two
+  // misses swing the rate wildly (135 parcels and 8 misses is "593 per 10k"), so they're listed after.
+  const ranked = list.filter((p) => p.parcels >= ENOUGH), few = list.filter((p) => p.parcels < ENOUGH);
+  const rows = ranked.map((p, i) => row(p, String(i + 1))).join("") +
+    (few.length ? '<p class="warn">' + esc(L().notEnough) + "</p>" + few.map((p) => row(p, "*")).join("") : "");
+  return "<section><h2>" + L().errorsHead + '</h2><div class="seg">' +
+    PERIODS.map((k) => '<button data-period="' + k + '"' + (k === period ? ' class="on"' : "") + ">" + L().periods[k] + "</button>").join("") +
+    '</div><p class="explain">' + esc(L().errorsExplain(from ? md(from) : "", avg == null ? null : avg.toFixed(1))) + "</p>" +
+    (rows || '<div class="empty">' + L().noOne + "</div>") + "</section>";
+}
+
+// One person's errors over the error board's period: {parcels, missed, missorts, rate} or null. An
+// error row's key is the employee ID, or "name|PDA" for a name nobody confirmed.
+const whoOf = (key) => String(key).split("|")[0].toLowerCase();
+function errorStatsFor(key) {
+  const E = DATA.errors;
+  if (!E || !E.days || !key) return null;
+  const [who, tab] = [whoOf(key), key.split("|").pop()];
+  const days = Object.keys(E.days).sort();
+  let from = "";
+  if (period !== "all" && days.length) {
+    const d = new Date(days[days.length - 1] + "T12:00:00Z");
+    d.setUTCDate(d.getUTCDate() - (+period - 1));
+    from = d.toISOString().slice(0, 10);
+  }
+  let parcels = 0, missed = 0, missorts = 0;
+  for (const day of days) {
+    if (day < from) continue;
+    for (const [_name, crew, ekey, n, m, s] of E.days[day]) {
+      if (whoOf(ekey) === who && (crew === tab || tab === "OTHER")) { parcels += n; missed += m; missorts += s; }
+    }
+  }
+  return parcels ? { parcels, missed, missorts, rate: ((missed + missorts) * 10000) / parcels } : null;
+}
+// The speed board's key for an error row's person, so tapping it opens the same details.
+function boardKeyFor(ekey, crew) {
+  const who = whoOf(ekey);
+  const keys = new Set();
+  for (const rows of Object.values(DATA.history)) for (const [name, t, id] of rows) keys.add((id || name.toLowerCase()) + "|" + t);
+  for (const t of Object.keys(DATA.board?.tabs || {})) for (const p of DATA.board.tabs[t].people || []) keys.add(keyOf(p));
+  // Employee IDs keep their case in board keys; names are lower case. Compare without case.
+  const all = [...keys], lower = (k) => k.toLowerCase();
+  return [who + "|" + crew, who + "|other"].map((w) => all.find((k) => lower(k) === lower(w))).find(Boolean)
+    || all.find((k) => lower(k).startsWith(who + "|")) || "";
+}
+
+// ---- One person's chart: tap a row. Day = their parcels each hour; Week / Month = their average
+// speed each day they worked. Which one is open survives the page's 1-minute reload.
+const keyOf = (p) => (p.unsigned ? "pda:" + p.name : (p.id || p.name.toLowerCase())) + "|" + p.tab;
+const VIEWS = ["day", "week", "month"];
+let openKey = null, view = "day", chart = null;
+try { const o = JSON.parse(sessionStorage.getItem("pda-open") || "null"); if (o) { openKey = o.key; view = o.view; } } catch (e) {}
+const saveOpen = () => { try { sessionStorage.setItem("pda-open", JSON.stringify(openKey ? { key: openKey, view } : null)); } catch (e) {} };
+const hourLabel = (col) => L().hourTick(col);
+
+function todayRow(key) {
+  for (const t of Object.keys(DATA.board?.tabs || {})) {
+    const p = (DATA.board.tabs[t].people || []).find((x) => keyOf(x) === key);
+    if (p) return p;
+  }
+  return null;
+}
+
+function historyOf(key) {
+  const days = {};
+  let who = null;
+  for (const [day, rows] of Object.entries(DATA.history)) {
+    for (const [name, t, id, parcels, hours] of rows) {
+      if ((id || name.toLowerCase()) + "|" + t === key && hours) { days[day] = { parcels, hours }; who = { name, tab: t }; }
+    }
+  }
+  return { days, who };
+}
+
+// points: [{label, tip, y (null = didn't work)}]. One line, so no legend: the heading names it.
+function lineChart(points, label) {
+  // Drawn at the sheet's real width, so the labels stay 12px on a phone.
+  const W = Math.round(Math.min(728, Math.max(280, (window.innerWidth || 640) - 32))), H = W < 500 ? 200 : 230, L = 44, R = 14, T = 14, B = 28;
+  const ys = points.map((p) => p.y).filter((y) => y != null);
+  const raw = Math.max(1, ...ys);
+  const base = Math.pow(10, Math.floor(Math.log10(raw / 4)));
+  const step = [1, 2, 5, 10].map((m) => m * base).find((s) => raw / s <= 4);
+  const top = Math.ceil(raw / step) * step;
+  const x = (i) => L + (points.length === 1 ? (W - L - R) / 2 : (i * (W - L - R)) / (points.length - 1));
+  const y = (v) => T + (1 - v / top) * (H - T - B);
+  let svg = '<svg viewBox="0 0 ' + W + " " + H + '" role="img" aria-label="' + esc(label) + '">';
+  for (let v = 0; v <= top; v += step) {
+    svg += '<line x1="' + L + '" x2="' + (W - R) + '" y1="' + y(v) + '" y2="' + y(v) + '" stroke="var(--line)" stroke-width="1"/>' +
+      '<text x="' + (L - 8) + '" y="' + (y(v) + 4) + '" text-anchor="end">' + n(v) + "</text>";
+  }
+  const every = Math.ceil(points.length / Math.max(2, Math.floor((W - L - R) / 72)));
+  points.forEach((p, i) => {
+    if (i % every === 0 || i === points.length - 1) {
+      svg += '<text x="' + x(i) + '" y="' + (H - 8) + '" text-anchor="' + (i === 0 ? "start" : i === points.length - 1 ? "end" : "middle") + '">' + esc(p.label) + "</text>";
+    }
+  });
+  // The line breaks over days they didn't work; each run of points gets a light area under it.
+  const runs = [];
+  let cur = [];
+  points.forEach((p, i) => { if (p.y == null) { if (cur.length) runs.push(cur); cur = []; } else cur.push(i); });
+  if (cur.length) runs.push(cur);
+  for (const run of runs) {
+    const line = run.map((i, k) => (k ? "L" : "M") + x(i) + " " + y(points[i].y)).join(" ");
+    if (run.length > 1) {
+      svg += '<path d="' + line + " L" + x(run[run.length - 1]) + " " + y(0) + " L" + x(run[0]) + " " + y(0) +
+        ' Z" fill="var(--accent)" fill-opacity="0.12"/>';
+    }
+    svg += '<path d="' + line + '" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>';
+  }
+  points.forEach((p, i) => {
+    if (p.y != null) svg += '<circle cx="' + x(i) + '" cy="' + y(p.y) + '" r="4" fill="var(--accent)" stroke="var(--card)" stroke-width="2"/>';
+  });
+  svg += '<line class="cross" x1="0" x2="0" y1="' + T + '" y2="' + (H - B) + '" stroke="var(--muted)" stroke-width="1" visibility="hidden"/>';
+  svg += '<circle class="hot" r="6" fill="var(--accent)" stroke="var(--card)" stroke-width="2" visibility="hidden"/></svg>';
+  chart = { points, xs: points.map((_, i) => x(i)), ys: points.map((p) => (p.y == null ? null : y(p.y))), W };
+  return '<div class="chart">' + svg + '<div class="tip"></div></div>';
+}
+
+function detail() {
+  if (!openKey) return "";
+  const board = DATA.board;
+  const now = todayRow(openKey);
+  const { days, who } = historyOf(openKey);
+  if (!now && !who) { openKey = null; saveOpen(); return ""; }
+  const name = now?.name || who.name, tabName = NAMES[now?.tab || who.tab];
+  const views = VIEWS.filter((k) => (k === "day" ? Boolean(now?.hourly) : !now?.unsigned));
+  if (!views.length) return "";
+  if (!views.includes(view)) view = views[0];
+  let points = [], stats = [], explain = "";
+  if (view === "day") {
+    const hourly = now.hourly;
+    const active = hourly.map((v, i) => (v ? i : -1)).filter((i) => i >= 0);
+    const from = Math.max(0, (active[0] ?? 0) - 1), to = Math.min(23, (active[active.length - 1] ?? 0) + 1);
+    for (let c = from; c <= to; c++) points.push({ label: hourLabel(c), y: hourly[c], tip: L().hourTip(hourRange(c), n(hourly[c])) });
+    const best = active.reduce((b, c) => (hourly[c] > hourly[b] ? c : b), active[0]);
+    stats = [[L().speed, n(Math.round(now.parcels / now.hours)) + L().perHour], [L().parcels, n(now.parcels)], [L().hoursScanning, String(now.hours)]];
+    if (best != null) stats.push([L().bestHour, hourRange(best)]);
+    explain = L().dayExplain(board.live, md(board.day));
+  } else {
+    const count = view === "week" ? 7 : 30;
+    const end = new Date((board?.day || Object.keys(DATA.history).sort().pop()) + "T12:00:00Z");
+    let parcels = 0, hours = 0, worked = 0;
+    for (let k = count - 1; k >= 0; k--) {
+      const d = new Date(end);
+      d.setUTCDate(d.getUTCDate() - k);
+      const day = d.toISOString().slice(0, 10), rec = days[day];
+      const label = (view === "week" ? L().weekdays[d.getUTCDay()] + " " : "") + md(day);
+      if (rec) { parcels += rec.parcels; hours += rec.hours; worked += 1; }
+      points.push({ label, y: rec ? Math.round(rec.parcels / rec.hours) : null,
+        tip: label + (rec ? L().dayTip(n(Math.round(rec.parcels / rec.hours)), n(rec.parcels), rec.hours) : L().off) });
+    }
+    stats = [[L().average, hours ? n(Math.round(parcels / hours)) + L().perHour : "–"], [L().daysWorked, String(worked)], [L().parcels, n(parcels)]];
+    explain = L().rangeExplain(count);
+  }
+  const err = errorStatsFor(openKey);
+  if (err) stats.push([L().errorRate(L().periods[period]), err.rate.toFixed(1) + L().perTenK]);
+  const pictures = (DATA.names || {})[openKey] || [];
+  const base = location.pathname.replace(/[/]+$/, ""); // (No backslashes: this script sits in a template string)
+  const sheet = "<h4>" + esc(L().onSheet) + "</h4>" + (pictures.length
+    ? '<div class="names">' + pictures.map(([id, day, written]) => '<figure><img src="' + esc(base + "/name/" + id) +
+        '" alt="' + esc(written) + '" loading="lazy" onerror="this.parentNode.remove()"><figcaption>' +
+        esc(L().sheetPic(md(day), written)) + "</figcaption></figure>").join("") + "</div>"
+    : '<p class="explain">' + esc(L().noSheetPics) + "</p>");
+  return '<div class="backdrop" data-close="1"><div class="sheet" role="dialog" aria-label="' + esc(name) + '">' +
+    '<div class="sheet-head"><div style="flex:1;min-width:0"><h3>' + esc(name) + '</h3><div class="meta">' + esc(tabName) +
+    (now ? " · " + esc(now.pdas.join(", ")) : "") + (now?.unsigned ? " · " + L().nobodySigned : "") + "</div></div>" +
+    '<button class="close" data-close="1" aria-label="' + L().close + '">×</button></div>' +
+    '<div class="seg">' + views.map((k) => '<button data-view="' + k + '"' + (k === view ? ' class="on"' : "") + ">" + L().views[k] + "</button>").join("") + "</div>" +
+    '<div class="stats">' + stats.map(([k, v]) => "<div><b>" + esc(v) + "</b>" + esc(k) + "</div>").join("") + "</div>" +
+    (err ? '<p class="explain">' + esc(L().errorCounts(dec(err.missed), dec(err.missorts))) + "</p>" : "") +
+    '<p class="explain">' + esc(explain) + "</p>" + lineChart(points, name + ": " + explain) + sheet + "</div></div>";
+}
+
+// Crosshair + tooltip: follows the pointer (or a tap) to the nearest point that has a value.
+function hover(e) {
+  const box = e.target.closest ? e.target.closest(".chart") : null;
+  if (!box || !chart) return;
+  const svg = box.querySelector("svg"), r = svg.getBoundingClientRect();
+  const px = ((e.clientX - r.left) / r.width) * chart.W;
+  let best = -1;
+  chart.xs.forEach((x, i) => { if (chart.ys[i] != null && (best < 0 || Math.abs(x - px) < Math.abs(chart.xs[best] - px))) best = i; });
+  if (best < 0) return;
+  const cross = svg.querySelector(".cross"), hot = svg.querySelector(".hot"), tip = box.querySelector(".tip");
+  cross.setAttribute("x1", chart.xs[best]); cross.setAttribute("x2", chart.xs[best]); cross.setAttribute("visibility", "visible");
+  hot.setAttribute("cx", chart.xs[best]); hot.setAttribute("cy", chart.ys[best]); hot.setAttribute("visibility", "visible");
+  const scale = r.width / chart.W;
+  tip.textContent = chart.points[best].tip;
+  tip.style.display = "block";
+  tip.style.left = Math.min(Math.max(chart.xs[best] * scale, 80), r.width - 80) + "px";
+  tip.style.top = chart.ys[best] * scale + "px";
+}
+document.addEventListener("pointermove", hover);
+document.addEventListener("pointerdown", hover);
+
+function render() {
+  const board = DATA.board;
+  document.documentElement.lang = L().htmlLang;
+  const title = titled(mode === "errors" ? L().errorTitle : L().title);
+  document.title = title;
+  document.getElementById("title").textContent = title;
+  document.getElementById("modes").innerHTML = ["speed", "errors"].map((k) =>
+    '<button data-mode="' + k + '"' + (k === mode ? ' class="on"' : "") + ">" + L().modes[k] + "</button>").join("");
+  document.getElementById("tabs").innerHTML = COMPANY ? "" : TABS.map((k) =>
+    '<button data-tab="' + k + '"' + (k === tab ? ' class="on"' : "") + ">" + L().tabs[k] + "</button>").join("");
+  document.getElementById("sub").textContent = !board ? L().noData
+    : (board.liveAt && board.noSheets ? L().subNoSheets(L().clock(board.liveAt))
+      : board.liveAt ? L().sub(L().clock(board.liveAt), L().clock(board.updated.slice(11)))
+      : L().updated(md(board.updated.slice(0, 10)), L().clock(board.updated.slice(11)))) +
+      (tab === "ALL" ? L().allMeans : "");
+  if (mode === "errors") {
+    document.getElementById("sub").textContent = (DATA.errors?.updated ? L().errorsUpdated(DATA.errors.updated) : L().noErrors) +
+      (tab === "ALL" ? L().allMeans : "");
+    document.getElementById("main").innerHTML = errorsView() + '<p class="help">' + esc(L().errorsHelp) + "</p>";
+    document.getElementById("detail").innerHTML = detail();
+    document.body.style.overflow = openKey ? "hidden" : "";
+    return;
+  }
+  document.getElementById("main").innerHTML = (board ? today(board) : "") + leaderboard() +
+    '<p class="help">' + esc(L().help) + "</p>";
+  document.getElementById("detail").innerHTML = detail();
+  document.body.style.overflow = openKey ? "hidden" : "";
+}
+
+document.addEventListener("click", (e) => {
+  const row = e.target.closest("[data-key]"), v = e.target.closest("[data-view]"), close = e.target.closest("[data-close]");
+  if (v) { view = v.dataset.view; saveOpen(); render(); return; }
+  if (close && (e.target === close || close.classList.contains("close"))) { openKey = null; saveOpen(); render(); return; }
+  if (row) {
+    openKey = row.dataset.key;
+    view = row.closest(".board-avg") ? "week" : "day"; // From the leaderboard, start on the week
+    saveOpen(); render(); return;
+  }
+  const m = e.target.closest("[data-mode]");
+  if (m) { mode = m.dataset.mode; history.replaceState(null, "", "#" + (mode === "errors" ? "errors-" : "") + tab.toLowerCase()); render(); return; }
+  const t = e.target.closest("[data-tab]"), p = e.target.closest("[data-period]"), a = e.target.closest("[data-active]");
+  if (a) { active = a.dataset.active; try { localStorage.setItem("pda-active", active); } catch (err) {} render(); }
+  if (t) { tab = t.dataset.tab; history.replaceState(null, "", "#" + (mode === "errors" ? "errors-" : "") + tab.toLowerCase()); render(); }
+  if (p) { period = p.dataset.period; try { localStorage.setItem("pda-period", period); } catch (err) {} render(); }
+});
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && openKey) { openKey = null; saveOpen(); render(); } });
+render();
+// While the page is open and showing, it reloads every minute for fresh numbers.
+setInterval(() => { if (!document.hidden) location.reload(); }, 60 * 1000);
+</script>
+</body>
+</html>
